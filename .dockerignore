@@ -1,0 +1,27 @@
+# Keep image build context small (same style as kadalai; adjust COPY in your Dockerfile).
+
+.git
+.github
+**/__pycache__
+**/*.py[cod]
+**/*.so
+.venv
+venv
+.uv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.ty_cache
+.hypothesis
+htmlcov
+.coverage
+coverage.xml
+coverage.json
+*.egg-info
+.eggs
+dist
+build
+node_modules
+**/.bench_out
+.env
+.env.*

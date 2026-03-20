@@ -1,0 +1,30 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v1
+        with:
+          version: "latest"
+      - run: uv sync
+      - name: Bump version
+        run: |
+          # Placeholder: bump version in pyproject.toml and add CHANGELOG entry
+          echo "Configure version bump and changelog update here"

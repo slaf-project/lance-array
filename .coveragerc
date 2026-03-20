@@ -1,0 +1,15 @@
+[run]
+source = scripts
+omit =
+    */tests/*
+    */test_*
+    */__pycache__/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    class .*\bProtocol\):
+    @(abc\.)?abstractmethod
