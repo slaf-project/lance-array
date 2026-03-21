@@ -1,14 +1,14 @@
 """
 Chunk-aligned 2D tile access backed by Lance.
 
-:class:`LanceArray` supports NumPy-style **2D indexing**: ``int``, ``slice`` (any
+`LanceArray` supports NumPy-style **2D indexing**: ``int``, ``slice`` (any
 step), ``...``, row-only keys (implicit ``:`` on columns), integer or boolean
 ``numpy`` masks, and ``list`` indices. Overlapping tiles are fetched with batched
 ``take_blobs`` and stitched (same idea as Zarr reading overlapping chunks).
 
 **Lance:** each row holds one encoded tile; reads use ``Dataset.take_blobs``.
-To create a dataset use :meth:`LanceArray.to_lance`. To **modify** tiles in place,
-open with ``mode="r+"`` and assign with basic indices (see :meth:`LanceArray.open`).
+To create a dataset use `LanceArray.to_lance`. To **modify** tiles in place,
+open with ``mode="r+"`` and assign with basic indices (see `LanceArray.open`).
 """
 
 from __future__ import annotations
@@ -72,16 +72,21 @@ __all__ = [
 
 
 class TileCodec(Enum):
-    """Built-in per-tile payload codecs for :meth:`LanceArray.to_lance`."""
+    """How each tile is encoded in the Lance blob column.
+
+    Pass a member (or string alias such as ``\"raw\"``, ``\"blosc_numcodecs\"``,
+    ``\"blosc2\"``) to `LanceArray.to_lance`. ``BLOSC2`` requires the ``blosc2``
+    package (e.g. ``lance-array[zarr]``). See enum members below for each preset.
+    """
 
     RAW = "raw"
-    """Contiguous raw bytes of the tile (``dtype`` itemsize × tile size)."""
+    """Uncompressed contiguous bytes (dtype itemsize × cells per tile)."""
 
     BLOSC_NUMCODECS = "blosc_numcodecs"
-    """Blosc via ``numcodecs.Blosc`` (Blosc1; good match to Zarr’s Blosc codec)."""
+    """Blosc1 via ``numcodecs.Blosc`` (typical Zarr Blosc parity)."""
 
     BLOSC2 = "blosc2"
-    """Blosc2 via ``blosc2.compress`` / ``decompress``."""
+    """Blosc2 via ``blosc2.compress`` / ``decompress`` (install ``blosc2``)."""
 
 
 def _coerce_tile_codec(codec: TileCodec | str) -> TileCodec:
@@ -215,7 +220,25 @@ def _build_tile_codecs(
 
 
 def normalize_chunk_slices(s: slice, dim: int) -> tuple[int, int]:
-    """Return ``(start, stop)`` for a slice with step 1 and positive length."""
+    """Normalize a slice to ``(start, stop)`` with step ``1`` and positive span.
+
+    Parameters
+    ----------
+    s
+        Slice along an axis of logical length ``dim`` (uses ``s.indices(dim)``).
+    dim
+        Size of that axis.
+
+    Returns
+    -------
+    tuple[int, int]
+        Half-open interval ``(start, stop)``.
+
+    Raises
+    ------
+    ValueError
+        If ``step != 1`` or the slice is empty after normalization.
+    """
     start, stop, step = s.indices(dim)
     if step != 1:
         raise ValueError("step must be 1")
@@ -279,15 +302,36 @@ def _load_coord_mapping(ds: lance.LanceDataset) -> dict[tuple[int, int], int]:
 def open_array(store: str | Path, *, mode: str = "r") -> LanceArray:
     """Open a Lance tile dataset (Zarr-style entry point).
 
-    Like :func:`zarr.open_array`, but for a dataset written by
-    :meth:`LanceArray.to_lance` (includes ``lance_array.json``).
+    Like ``zarr.open_array``, but for a dataset written by `LanceArray.to_lance`
+    (includes ``lance_array.json``).
 
-    ``mode="r"`` is read-only. ``mode="r+"`` allows :meth:`~LanceArray.__setitem__`
-    for basic indices (see PRD ``prds/lance-array-slice-writes.md``).
+    Parameters
+    ----------
+    store
+        Dataset directory or URI passed to ``lance.dataset``.
+    mode
+        ``"r"`` read-only. ``"r+"`` allows `LanceArray.__setitem__` for basic
+        indices (see PRD ``prds/lance-array-slice-writes.md``).
 
-    For ``s3://``, ``gs://``, or ``https://`` roots, install ``smart-open`` (extra
-    ``lance-array[cloud]``); the manifest is read via :mod:`smart_open` and the
-    same URI is passed to ``lance.dataset``.
+    Returns
+    -------
+    LanceArray
+        Same as `LanceArray.open`.
+
+    Raises
+    ------
+    ValueError
+        Invalid ``mode``, corrupt manifest, or dataset row count mismatch.
+    FileNotFoundError
+        Missing ``lance_array.json`` for a local path.
+    ImportError
+        Remote URI without ``smart-open`` installed.
+
+    Notes
+    -----
+    For ``s3://``, ``gs://``, or ``https://``, install ``smart-open`` (extra
+    ``lance-array[cloud]``). The manifest is read with ``smart_open`` before
+    opening Lance.
     """
     return LanceArray.open(store, mode=mode)
 
@@ -563,7 +607,7 @@ class LanceArray:
 
     Rows are indexed by logical tile grid ``(tile_i, tile_j)`` mapped to a Lance
     **positional** row index for ``take_blobs``. Each stored payload is decoded
-    using the :class:`TileCodec` chosen at write time; see :meth:`decode_tile`.
+    using the `TileCodec` chosen at write time; see `decode_tile`.
 
     **Indexing:** NumPy-like ``view[row, col]`` — ``int``, ``slice`` (including
     step ≠ 1), ``...``, ``view[row]`` as ``view[row, :]``, and advanced indices
@@ -575,11 +619,20 @@ class LanceArray:
     basic NumPy indexing with **slice step 1** on both axes; fancy and boolean
     assignment is not implemented.
 
-    **Full raster:** :meth:`to_numpy` materializes the entire grid in one batched
-    read path.
+    **Full raster:** `to_numpy` materializes the entire grid in one batched read
+    path.
 
-    **Create on disk:** :meth:`to_lance` writes a new dataset from a numpy image
-    and returns a read-only view; open with ``mode="r+"`` to mutate.
+    **Create on disk:** `LanceArray.to_lance` writes a new dataset from a NumPy
+    image and returns a read-only view; open with ``mode="r+"`` to mutate.
+
+    Attributes
+    ----------
+    shape : tuple[int, int]
+        Raster shape ``(H, W)``.
+    chunks : tuple[int, int]
+        Tile shape ``(ch0, ch1)``.
+    dtype : numpy.dtype
+        Pixel dtype of the logical raster.
     """
 
     def __init__(
@@ -594,6 +647,29 @@ class LanceArray:
         dtype: np.dtype | None = None,
         encode_tile: Callable[[np.ndarray], bytes] | None = None,
     ) -> None:
+        """Build a view from an open Lance dataset (prefer `LanceArray.open` or `LanceArray.to_lance`).
+
+        Parameters
+        ----------
+        dataset
+            Open ``lance.LanceDataset`` with one row per tile and ``(i, j)`` keys.
+        chunk_shape
+            ``(ch0, ch1)`` tile size in pixels.
+        image_shape
+            Full raster shape ``(H, W)``.
+        coord_to_row
+            Map ``(tile_i, tile_j)`` to the **positional** row index used by
+            ``take_blobs`` (see module helpers).
+        decode_tile
+            Decode one blob payload to a ``chunk_shape`` array.
+        blob_column
+            Lance blob column name for tile payloads.
+        dtype
+            Raster dtype; defaults to ``uint16`` if omitted.
+        encode_tile
+            Encode a tile array to bytes; must be set for ``r+`` writes, else
+            ``None`` for read-only views.
+        """
         self._ds = dataset
         self.shape: tuple[int, int] = image_shape
         self.chunks: tuple[int, int] = chunk_shape
@@ -607,14 +683,20 @@ class LanceArray:
 
     @property
     def ndim(self) -> int:
-        """Number of dimensions (always ``2`` for this type)."""
+        """Number of dimensions.
+
+        Returns
+        -------
+        int
+            Always ``2``.
+        """
         return 2
 
     @classmethod
     def open(cls, path: str | Path, *, mode: str = "r") -> LanceArray:
-        """Open a dataset written with :meth:`to_lance` using a sidecar manifest.
+        """Open a dataset written with `LanceArray.to_lance` using a sidecar manifest.
 
-        The dataset root must expose ``lance_array.json`` (written by :meth:`to_lance`).
+        The dataset root must expose ``lance_array.json`` (written by `LanceArray.to_lance`).
         For local paths this is a file under the dataset directory; for URIs (e.g.
         ``s3://...``) the manifest is read via optional ``smart-open``.
 
@@ -626,8 +708,23 @@ class LanceArray:
             (``pip install 'lance-array[cloud]'``); credentials follow the normal
             cloud SDK / environment defaults.
         mode
-            ``\"r\"`` read-only. ``\"r+\"`` allows :meth:`__setitem__` for basic
-            indices (contiguous slices and integers; slice step must be ``1``).
+            ``"r"`` read-only. ``"r+"`` allows `__setitem__` for basic indices
+            (contiguous slices and integers; slice step must be ``1``).
+
+        Returns
+        -------
+        LanceArray
+            View over the on-disk dataset; use ``mode="r+"`` for slice assignment.
+
+        Raises
+        ------
+        ValueError
+            If ``mode`` is invalid, the manifest is missing/unsupported, or the
+            table does not match manifest shape/chunks.
+        FileNotFoundError
+            If ``lance_array.json`` is missing for a local path.
+        ImportError
+            If a remote URI is used without ``smart-open`` installed.
         """
         if mode not in ("r", "r+"):
             raise ValueError(f"invalid mode {mode!r}")
@@ -694,13 +791,13 @@ class LanceArray:
             "stable", "2.0", "2.1", "2.2", "2.3", "next", "legacy", "0.1"
         ] = "2.2",
     ) -> LanceArray:
-        """Write a 2D ``image`` as one encoded tile per row and return a :class:`LanceArray`.
+        """Write a 2D ``image`` as one encoded tile per row and return a `LanceArray`.
 
         The on-disk table has columns ``row_id``, ``i``, ``j`` (tile indices), and
         a blob column (default name ``blob``, blob v2). A sidecar ``lance_array.json``
-        stores shape, chunk grid, dtype, and codec parameters so :meth:`open` works.
+        stores shape, chunk grid, dtype, and codec parameters so `LanceArray.open` works.
 
-        Pass ``codec=`` :class:`TileCodec` (or a string alias such as ``\"raw\"``,
+        Pass ``codec=`` as `TileCodec` or a string alias (``\"raw\"``,
         ``\"blosc_numcodecs\"``, ``\"blosc2\"``). Blosc presets use ``blosc_typesize``
         (defaults to ``dtype`` itemsize), ``blosc_clevel``, and ``blosc_cname`` where
         applicable.
@@ -730,8 +827,14 @@ class LanceArray:
         Returns
         -------
         LanceArray
-            Read-only view over the written dataset (use :meth:`open` with
+            Read-only view over the written dataset (use `LanceArray.open` with
             ``mode="r+"`` to assign slices).
+
+        Raises
+        ------
+        ValueError
+            If ``image`` is not 2D, shape is not divisible by ``chunk_shape``, or
+            codec options are invalid.
         """
         enc, dec = _build_tile_codecs(
             chunk_shape,
@@ -816,29 +919,73 @@ class LanceArray:
 
     @property
     def coord_to_row(self) -> dict[tuple[int, int], int]:
-        """Map ``(tile_i, tile_j)`` to Lance row index (for batched ``take_blobs``)."""
+        """Map each tile grid index to its Lance **positional** row index.
+
+        Returns
+        -------
+        dict[tuple[int, int], int]
+            Keys ``(tile_i, tile_j)``; values are indices for ``take_blobs``.
+        """
         return self._coord_to_row
 
     @property
     def blob_column(self) -> str:
-        """Name of the Lance blob column backing tile payloads."""
+        """Lance column name holding encoded tile payloads.
+
+        Returns
+        -------
+        str
+            Blob v2 column name (default ``\"blob\"`` unless overridden at write).
+        """
         return self._blob_column
 
     @property
     def dataset(self) -> lance.LanceDataset:
-        """Underlying Lance dataset (e.g. for ``take_blobs`` batching)."""
+        """Underlying Lance dataset handle.
+
+        Returns
+        -------
+        lance.LanceDataset
+            Use e.g. ``take_blobs`` for advanced access; most users rely on
+            `__getitem__` / `to_numpy` instead.
+        """
         return self._ds
 
     def decode_tile(self, data: bytes) -> np.ndarray:
-        """Decode one stored payload to a tile (shape ``chunks``, dtype ``self.dtype``)."""
+        """Decode one blob from storage into a single tile array.
+
+        Parameters
+        ----------
+        data
+            Raw bytes from the blob column for one row.
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``chunks``, dtype ``self.dtype``.
+        """
         return self._decode_tile(data)
 
     @property
     def n_tile_rows(self) -> int:
+        """Number of tile rows along axis 0.
+
+        Returns
+        -------
+        int
+            ``shape[0] // chunks[0]``.
+        """
         return self.shape[0] // self.chunks[0]
 
     @property
     def n_tile_cols(self) -> int:
+        """Number of tile columns along axis 1.
+
+        Returns
+        -------
+        int
+            ``shape[1] // chunks[1]``.
+        """
         return self.shape[1] // self.chunks[1]
 
     def _getitem_both_basic(
@@ -931,6 +1078,30 @@ class LanceArray:
         return out
 
     def __getitem__(self, key: Any) -> np.ndarray:
+        """Read a scalar, slice, or advanced subregion (NumPy 2D semantics).
+
+        Overlapping tiles are fetched via batched ``take_blobs``, decoded, and
+        stitched (including strided slices and partial edge windows).
+
+        Parameters
+        ----------
+        key
+            ``int``, ``slice``, ``Ellipsis``, row-only key, integer/boolean
+            ``numpy.ndarray``, or ``list`` indices; same rank and broadcasting
+            rules as NumPy for a 2D array.
+
+        Returns
+        -------
+        numpy.ndarray
+            0-d for scalar indices, otherwise the selected subarray.
+
+        Raises
+        ------
+        IndexError
+            If indices are out of bounds or boolean masks do not match ``shape``.
+        TypeError
+            For invalid key types (e.g. Python ``bool`` instead of a boolean array).
+        """
         r_spec, c_spec = _normalize_lance_key(key)
         h, w = self.shape
         br = _coerce_1d_bool_index(r_spec)
@@ -993,6 +1164,24 @@ class LanceArray:
         self._coord_to_row = _load_coord_mapping(self._ds)
 
     def __setitem__(self, key: Any, value: Any) -> None:
+        """Write through basic indices only (``r+`` mode).
+
+        Each affected tile is read, patched in memory, re-encoded, and merged back
+        on ``(i, j)`` keys.
+
+        Parameters
+        ----------
+        key
+            ``int`` or ``slice`` with **step 1** on both axes (after NumPy
+            normalization). Fancy and boolean assignment are not supported.
+        value
+            Value or array broadcastable to the overlapping region.
+
+        Raises
+        ------
+        NotImplementedError
+            If the view is read-only, or ``key`` uses fancy/boolean indexing.
+        """
         if self._encode_tile is None:
             raise NotImplementedError(
                 "LanceArray is read-only; open with mode='r+' for slice assignment, "
@@ -1037,6 +1226,12 @@ class LanceArray:
         self._merge_update_tiles(tiles_work, ij_to_stored_row_id=ij_to_stored)
 
     def to_numpy(self) -> np.ndarray:
-        """Decode every tile and assemble a full ``(H, W)`` array."""
+        """Decode all tiles and return the full raster (single batched read path).
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``self.shape``, dtype ``self.dtype``.
+        """
         h, w = self.shape
         return self._read_subarray(0, h, 0, w)

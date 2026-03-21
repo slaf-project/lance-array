@@ -176,7 +176,7 @@ All 64 tiles in the 8×8 grid were touched at least once (batched path prefetche
 
 ## API reference
 
-- [`lance_array.core`](api/core.md) — `LanceArray`, `open_array`, `normalize_chunk_slices`
+- [Core API](api/core.md) — `LanceArray`, `TileCodec`, `open_array`, `normalize_chunk_slices`
 
 ## Acknowledgments
 

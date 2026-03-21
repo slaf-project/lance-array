@@ -1,0 +1,71 @@
+/* mkdocstrings + Material (DOM matches mkdocstrings-python HTML) */
+
+.doc.doc-heading {
+  border-bottom: 2px solid var(--md-primary-fg-color);
+  padding-bottom: 0.5rem;
+  margin-bottom: 1rem;
+  margin-top: 1.5rem;
+}
+
+.doc.doc-object.doc-class {
+  border: 2px solid var(--md-primary-fg-color);
+  border-radius: 8px;
+  padding: 1.5rem 2rem 2rem;
+  margin-bottom: 3rem;
+  background: linear-gradient(
+    135deg,
+    var(--md-default-bg-color) 0%,
+    var(--md-primary-fg-color--lightest) 100%
+  );
+}
+
+.doc.doc-object.doc-function {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  background: var(--md-default-bg-color);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+.doc.doc-object.doc-function:hover {
+  border-color: var(--md-primary-fg-color--light);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.doc.doc-object.doc-attribute {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  background: var(--md-default-bg-color);
+  border-left: 4px solid #ff9800;
+}
+
+/* Parameter / returns tables inside docstrings */
+.doc-contents table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+
+.doc-contents table th,
+.doc-contents table td {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  padding: 0.65rem 0.85rem;
+  vertical-align: top;
+}
+
+.doc-contents table thead {
+  background: var(--md-code-bg-color);
+}
+
+.doc-contents table tbody tr:nth-child(even) {
+  background-color: rgba(127, 127, 127, 0.06);
+}
+
+.doc-section-title {
+  font-weight: 600;
+  color: var(--md-primary-fg-color);
+}

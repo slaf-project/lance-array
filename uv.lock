@@ -411,6 +411,7 @@ dev = [
 ]
 docs = [
     { name = "mkdocs" },
+    { name = "mkdocs-autorefs" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
 ]
@@ -427,6 +428,7 @@ requires-dist = [
     { name = "blosc2", marker = "extra == 'zarr'", specifier = ">=3.0.0" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.9.1" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5.0" },
+    { name = "mkdocs-autorefs", marker = "extra == 'docs'", specifier = ">=1.0.0" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.24.0" },
     { name = "numcodecs", specifier = ">=0.12.0" },

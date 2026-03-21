@@ -3,8 +3,12 @@ site_description: Chunk-aligned Lance tile arrays and Zarr benchmarks
 site_author: Pavan Ramkumar
 site_url: https://slaf-project.github.io/lance-array/
 
+repo_name: slaf-project/lance-array
 repo_url: https://github.com/slaf-project/lance-array
 edit_uri: edit/main/docs/
+
+extra_css:
+  - stylesheets/extra.css
 
 theme:
   name: material
@@ -12,29 +16,58 @@ theme:
     - scheme: default
       primary: indigo
       accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to dark mode
     - scheme: slate
       primary: indigo
       accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to light mode
   features:
+    - navigation.sections
     - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/slaf-project/lance-array
 
 plugins:
   - search
+  - autorefs
   - mkdocstrings:
       handlers:
         python:
           paths: [.]
           options:
+            # Match NumPy-style Parameters/Returns in core.py (sphinx mode leaves them flat).
+            docstring_style: numpy
+            show_root_heading: true
+            show_root_toc_entry: true
+            show_signature_annotations: true
+            show_category_heading: true
+            heading_level: 2
+            show_if_no_docstring: false
+            members_order: source
+            show_bases: true
             show_source: false
+            filters: ["!^_", "!^__", "__init__"]
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - toc:
+      permalink: true
 
 nav:
   - Home: index.md
-  - API:
-      - core: api/core.md
-
-markdown_extensions:
-  - pymdownx.highlight
-  - pymdownx.superfences
-  - admonition
-  - toc:
-      permalink: true
+  - API Reference:
+      - Core: api/core.md
