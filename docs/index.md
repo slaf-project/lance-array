@@ -153,11 +153,12 @@ uv run python scripts/run_benchmark.py --full
 
 | | |
 |--|--|
-| Date | 2025-03-21 |
+| Date | 2026-03-21 |
 | Machine | Apple M1 Max, 32 GB RAM |
 | OS | macOS 26.0.1 (Tahoe) |
 | Python | 3.12.10 |
 | `zarr` | 3.1.5 |
+| `zarrs` ([zarrs-python](https://github.com/zarrs/zarrs-python), Rust codec pipeline) | 0.2.2 |
 | `lance` (PyPI `pylance`) | 3.0.1 |
 
 ### Results (2048×2048 uint16, 256×256 chunks, 500 random reads)
@@ -166,13 +167,13 @@ All 64 tiles in the 8×8 grid were touched at least once (batched path prefetche
 
 | Backend | Size (MiB) | Single-chunk | Batched replay |
 |---------|------------|--------------|----------------|
-| Zarr (no compression) | 8.00 | 0.654 | 0.147 |
-| Lance (no compression) | 8.01 | 0.317 | 0.007 |
-| Zarr (numcodecs Blosc) | 1.77 | 0.938 | 0.100 |
-| Lance (numcodecs Blosc) | 1.78 | 0.742 | 0.026 |
-| Lance (Blosc2) | 1.78 | 0.453 | 0.016 |
+| Zarr (no compression) | 8.00 | 0.350 | 0.039 |
+| Lance (no compression) | 8.01 | 0.426 | 0.011 |
+| Zarr (numcodecs Blosc) | 1.77 | 0.397 | 0.036 |
+| Lance (numcodecs Blosc) | 1.78 | 0.452 | 0.024 |
+| Lance (Blosc2) | 1.78 | 0.584 | 0.019 |
 
-**Notes.** “Single” is one slice per iteration, no cross-iteration cache. “Batched” prefetches unique chunks (Lance: `take_blobs`; Zarr: in-memory cache), then replays the same sequence—roughly modeling amortized object-store round trips. **Local SSD** numbers; re-run on your stack before generalizing.
+**Notes.** “Single” is one slice per iteration, no cross-iteration cache. “Batched” prefetches unique chunks (Lance: `take_blobs`; Zarr: in-memory cache), then replays the same sequence—roughly modeling amortized object-store round trips. **Zarr** timings use the **zarrs** Rust codec pipeline (default in `run_benchmark.py` when `zarrs` is installed on Python 3.11+; pass `--no-zarrs` for zarr-python’s default pipeline). **Local SSD** numbers; re-run on your stack before generalizing.
 
 ## API reference
 

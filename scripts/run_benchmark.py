@@ -3,7 +3,12 @@ Time random chunk reads: Zarr vs Lance (same pattern as ``create_benchmark_datas
 
 Requires ``scripts/test.zarr`` and ``scripts/test.lance`` from
 ``create_benchmark_datasets.py``. Use ``--full`` after ``create_benchmark_datasets.py --full``
-for the five-way comparison (uncompressed Zarr, Blosc Zarr, Lance raw / numcodecs / Blosc2).
+for the five-way comparison (README order: Zarr/Lance uncompressed, Zarr/Lance Blosc, Lance Blosc2).
+
+On Python 3.11+ with ``zarrs`` installed (``uv sync --extra zarr``), Zarr reads use the
+`zarrs <https://github.com/zarrs/zarrs-python>`_ Rust codec pipeline by default. Pass
+``--no-zarrs`` for zarr-python's default pipeline, or ``--zarrs`` to force it when auto
+would skip (e.g. comparing installs).
 """
 
 from __future__ import annotations
@@ -36,6 +41,30 @@ from create_benchmark_datasets import (
 from lance_array import LanceArray, open_array
 
 N_READS = 500
+
+
+def _zarrs_available() -> bool:
+    try:
+        import zarrs  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _apply_zarr_codec_pipeline(use_zarrs: bool) -> None:
+    """Use zarrs Rust pipeline when requested and installed; else zarr-python default."""
+    if not use_zarrs:
+        return
+    if not _zarrs_available():
+        print(
+            "Note: zarrs not installed or unsupported on this Python; "
+            "using zarr-python default codec pipeline. "
+            "Install with: uv sync --extra zarr (Python 3.11+).",
+            file=sys.stderr,
+        )
+        return
+    zarr.config.set({"codec_pipeline.path": "zarrs.ZarrsCodecPipeline"})
+    print("Using zarrs Rust codec pipeline for Zarr reads.", file=sys.stderr)
 
 
 def unique_coords_in_order(coords: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -133,12 +162,36 @@ def main() -> None:
     import argparse
 
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.set_defaults(use_zarrs=None)
     ap.add_argument(
         "--full",
         action="store_true",
         help=f"Expect a full suite under {WORK_DIR} (from create_benchmark_datasets.py --full)",
     )
+    zg = ap.add_mutually_exclusive_group()
+    zg.add_argument(
+        "--zarrs",
+        dest="use_zarrs",
+        action="store_const",
+        const=True,
+        help="Use zarrs (Rust) codec pipeline for Zarr reads (default: on if zarrs is installed)",
+    )
+    zg.add_argument(
+        "--no-zarrs",
+        dest="use_zarrs",
+        action="store_const",
+        const=False,
+        help="Use zarr-python default codec pipeline for Zarr reads",
+    )
     args = ap.parse_args()
+
+    if args.use_zarrs is True:
+        use_zarrs = True
+    elif args.use_zarrs is False:
+        use_zarrs = False
+    else:
+        use_zarrs = _zarrs_available()
+    _apply_zarr_codec_pipeline(use_zarrs)
 
     ch0, ch1 = CHUNK_SHAPE
     img_shape = (2048, 2048)
@@ -169,21 +222,23 @@ def main() -> None:
         l_nc = open_array(LANCE_BLOB_NUMCODECS_PATH)
         l_b2 = open_array(LANCE_BLOB_BLOSC2_PATH)
 
+        row_ids, unique_ids = _row_ids_for_coords(l_raw, coords)
+
+        # Same order as README.md results table: Zarr/Lance pairs, then Lance Blosc2
         zarr_unc_single, zarr_unc_batch = bench_zarr_reads(
-            "Zarr uncompressed", z_unc, coords, unique_coord_list
+            "Zarr (no compression)", z_unc, coords, unique_coord_list
+        )
+        raw_single, raw_batch = bench_lance_reads(
+            "Lance (no compression)", l_raw, coords, row_ids, unique_ids
         )
         zarr_blosc_single, zarr_blosc_batch = bench_zarr_reads(
-            "Zarr Blosc", z_blosc, coords, unique_coord_list
-        )
-        row_ids, unique_ids = _row_ids_for_coords(l_raw, coords)
-        raw_single, raw_batch = bench_lance_reads(
-            "raw uint16 blobs", l_raw, coords, row_ids, unique_ids
+            "Zarr (numcodecs Blosc)", z_blosc, coords, unique_coord_list
         )
         nc_single, nc_batch = bench_lance_reads(
-            "numcodecs Blosc blobs", l_nc, coords, row_ids, unique_ids
+            "Lance (numcodecs Blosc)", l_nc, coords, row_ids, unique_ids
         )
         b2_single, b2_batch = bench_lance_reads(
-            "Blosc2 blobs", l_b2, coords, row_ids, unique_ids
+            "Lance (Blosc2)", l_b2, coords, row_ids, unique_ids
         )
 
         zarr_unc_disk_mb = dir_byte_size(ZARR_UNCOMPRESSED_PATH) / (1024 * 1024)
@@ -195,23 +250,23 @@ def main() -> None:
         print("\n========== SUMMARY (full suite, .bench_out) ==========")
         print(f"Unique chunks touched: {len(unique_coord_list)} / {rows * cols}")
         print(
-            f"Zarr uncompressed:       {zarr_unc_disk_mb:.2f} MiB  |  single "
+            f"Zarr (no compression):   {zarr_unc_disk_mb:.2f} MiB  |  single "
             f"{zarr_unc_single / N_READS * 1e3:.3f} ms  |  batched {zarr_unc_batch / N_READS * 1e3:.3f} ms"
         )
         print(
-            f"Zarr Blosc:              {zarr_disk_mb:.2f} MiB  |  single "
-            f"{zarr_blosc_single / N_READS * 1e3:.3f} ms  |  batched {zarr_blosc_batch / N_READS * 1e3:.3f} ms"
-        )
-        print(
-            f"Lance raw blobs:         {mb_raw:.2f} MiB  |  single {raw_single / N_READS * 1e3:.3f} ms  "
+            f"Lance (no compression):  {mb_raw:.2f} MiB  |  single {raw_single / N_READS * 1e3:.3f} ms  "
             f"|  batched {raw_batch / N_READS * 1e3:.3f} ms"
         )
         print(
-            f"Lance numcodecs Blosc:   {mb_nc:.2f} MiB  |  single {nc_single / N_READS * 1e3:.3f} ms  "
+            f"Zarr (numcodecs Blosc):  {zarr_disk_mb:.2f} MiB  |  single "
+            f"{zarr_blosc_single / N_READS * 1e3:.3f} ms  |  batched {zarr_blosc_batch / N_READS * 1e3:.3f} ms"
+        )
+        print(
+            f"Lance (numcodecs Blosc): {mb_nc:.2f} MiB  |  single {nc_single / N_READS * 1e3:.3f} ms  "
             f"|  batched {nc_batch / N_READS * 1e3:.3f} ms"
         )
         print(
-            f"Lance Blosc2:            {mb_b2:.2f} MiB  |  single {b2_single / N_READS * 1e3:.3f} ms  "
+            f"Lance (Blosc2):          {mb_b2:.2f} MiB  |  single {b2_single / N_READS * 1e3:.3f} ms  "
             f"|  batched {b2_batch / N_READS * 1e3:.3f} ms"
         )
         return
@@ -227,12 +282,12 @@ def main() -> None:
     z_test = zarr.open_array(TEST_ZARR, mode="r")
     la_test = open_array(TEST_LANCE, mode="r")
 
-    z_single, z_batch = bench_zarr_reads(
-        "Zarr (test.zarr, Blosc)", z_test, coords, unique_coord_list
-    )
     row_ids, unique_ids = _row_ids_for_coords(la_test, coords)
+    z_single, z_batch = bench_zarr_reads(
+        "Zarr (numcodecs Blosc)", z_test, coords, unique_coord_list
+    )
     l_single, l_batch = bench_lance_reads(
-        "Lance (test.lance, numcodecs Blosc)", la_test, coords, row_ids, unique_ids
+        "Lance (numcodecs Blosc)", la_test, coords, row_ids, unique_ids
     )
 
     z_mb = dir_byte_size(TEST_ZARR) / (1024 * 1024)
@@ -241,11 +296,11 @@ def main() -> None:
     print("\n========== SUMMARY (canonical test.zarr vs test.lance) ==========")
     print(f"Unique chunks touched: {len(unique_coord_list)} / {rows * cols}")
     print(
-        f"Zarr (Blosc):     {z_mb:.2f} MiB  |  single {z_single / N_READS * 1e3:.3f} ms  "
+        f"Zarr (numcodecs Blosc):  {z_mb:.2f} MiB  |  single {z_single / N_READS * 1e3:.3f} ms  "
         f"|  batched {z_batch / N_READS * 1e3:.3f} ms"
     )
     print(
-        f"Lance (Blosc):    {l_mb:.2f} MiB  |  single {l_single / N_READS * 1e3:.3f} ms  "
+        f"Lance (numcodecs Blosc): {l_mb:.2f} MiB  |  single {l_single / N_READS * 1e3:.3f} ms  "
         f"|  batched {l_batch / N_READS * 1e3:.3f} ms"
     )
 
