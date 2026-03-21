@@ -20,5 +20,5 @@ jobs:
       - uses: astral-sh/setup-uv@v1
         with:
           version: "latest"
-      - run: uv sync --extra docs --extra lance
+      - run: uv sync --extra docs
       - run: uv run mkdocs build --strict

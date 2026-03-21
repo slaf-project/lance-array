@@ -1,22 +1,26 @@
 [project]
 name = "lance-array"
 version = "0.1.0"
-description = "Chunk-aligned Zarr 3 and Lance blob v2 tile arrays, plus Zarr vs Lance benchmarks"
+description = "Chunk-aligned Lance tile arrays and Zarr vs Lance benchmarks"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10,<3.14"
 
 dependencies = [
     "numpy>=1.24.0",
+    "pylance>=2.0.0",
+    "pyarrow>=14.0.0",
+    "numcodecs>=0.12.0",
 ]
 
 [project.optional-dependencies]
-lance = ["pylance>=2.0.0", "pyarrow>=14.0.0"]
+cloud = [
+    "smart-open>=6.0.0",
+]
 zarr = [
     "zarr>=2.18.0",
     "blosc2>=3.0.0",
     "pillow>=10.0.0",
-    "numcodecs>=0.12.0",
     "tqdm>=4.0.0",
 ]
 dev = [
@@ -25,6 +29,7 @@ dev = [
     "coverage>=7.9.1",
     "ruff>=0.12.0",
     "prek>=0.3.0",
+    "smart-open>=6.0.0",
 ]
 docs = [
     "mkdocs>=1.5.0",
@@ -37,7 +42,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["scripts", "scripts.lance_vs_zarr"]
+packages = ["lance_array"]
 
 [tool.ruff]
 target-version = "py312"
@@ -49,7 +54,8 @@ ignore = ["E501", "B008", "C901"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"scripts/lance_vs_zarr/benchmark.py" = ["E402"]
+"scripts/create_benchmark_datasets.py" = ["E402"]
+"scripts/run_benchmark.py" = ["E402", "I001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

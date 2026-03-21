@@ -41,7 +41,7 @@ jobs:
       - uses: astral-sh/setup-uv@v1
         with:
           version: "latest"
-      - run: uv sync --extra dev --extra lance
+      - run: uv sync --extra dev
       - run: uv run pytest tests -v --tb=short
 
   build:

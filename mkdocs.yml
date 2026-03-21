@@ -1,5 +1,5 @@
 site_name: lance-array
-site_description: Chunk-aligned Zarr 3 and Lance blob v2 tile arrays
+site_description: Chunk-aligned Lance tile arrays and Zarr benchmarks
 site_author: Pavan Ramkumar
 site_url: https://slaf-project.github.io/lance-array/
 
@@ -30,7 +30,7 @@ plugins:
 nav:
   - Home: index.md
   - API:
-    - chunk_tiles: api/chunk_tiles.md
+      - core: api/core.md
 
 markdown_extensions:
   - pymdownx.highlight

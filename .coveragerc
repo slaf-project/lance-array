@@ -1,5 +1,5 @@
 [run]
-source = scripts
+source = lance_array
 omit =
     */tests/*
     */test_*

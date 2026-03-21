@@ -26,4 +26,6 @@ coverage.xml
 node_modules/
 
 # Benchmark outputs
-scripts/lance_vs_zarr/.bench_out/
+scripts/.bench_out/
+scripts/test.zarr/
+scripts/test.lance/
