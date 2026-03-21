@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -25,6 +26,7 @@ import numpy as np
 import zarr
 import zarr.codecs as zc
 from PIL import Image
+from zarr.storage import LocalStore
 
 from lance_array import LanceArray, TileCodec
 
@@ -91,7 +93,7 @@ def write_test_zarr(img: np.ndarray, path: Path):
     """Zarr 3 API: ``create_array`` + whole-array assign (same pattern as Zarr docs)."""
     if path.exists():
         shutil.rmtree(path)
-    store = zarr.storage.LocalStore(path)
+    store = LocalStore(path)
     z = zarr.create_array(
         store,
         shape=img.shape,
@@ -143,7 +145,7 @@ def create_full_suite(img: np.ndarray) -> None:
             shutil.rmtree(p)
 
     print(f"Writing Zarr uncompressed → {ZARR_UNCOMPRESSED_PATH} ...")
-    store_u = zarr.storage.LocalStore(ZARR_UNCOMPRESSED_PATH)
+    store_u = LocalStore(ZARR_UNCOMPRESSED_PATH)
     z_unc = zarr.create_array(
         store_u,
         shape=img.shape,
@@ -156,7 +158,7 @@ def create_full_suite(img: np.ndarray) -> None:
     print(f"  on-disk: {dir_byte_size(ZARR_UNCOMPRESSED_PATH) / (1024 * 1024):.2f} MiB")
 
     print(f"Writing Zarr Blosc → {ZARR_BLOSC_PATH} ...")
-    store_b = zarr.storage.LocalStore(ZARR_BLOSC_PATH)
+    store_b = LocalStore(ZARR_BLOSC_PATH)
     z_inner = zarr.create_array(
         store_b,
         shape=img.shape,
@@ -201,7 +203,9 @@ def create_full_suite(img: np.ndarray) -> None:
         blosc_clevel=CLEVEL,
         blosc_cname="zstd",
     )
-    print(f"  on-disk: {dir_byte_size(LANCE_BLOB_NUMCODECS_PATH) / (1024 * 1024):.2f} MiB")
+    print(
+        f"  on-disk: {dir_byte_size(LANCE_BLOB_NUMCODECS_PATH) / (1024 * 1024):.2f} MiB"
+    )
 
     _r = img.shape[0] // 2 // ch0 * ch0
     _c = img.shape[1] // 2 // ch1 * ch1
@@ -209,7 +213,8 @@ def create_full_suite(img: np.ndarray) -> None:
         z_inner[_r : _r + ch0, _c : _c + ch1], dtype=np.dtype(z_inner.dtype)
     )
     assert np.array_equal(
-        z_tile, np.asarray(z_unc[_r : _r + ch0, _c : _c + ch1], dtype=np.dtype(z_unc.dtype))
+        z_tile,
+        np.asarray(z_unc[_r : _r + ch0, _c : _c + ch1], dtype=np.dtype(z_unc.dtype)),
     )
     lance_raw = LanceArray.open(LANCE_BLOB_RAW_PATH)
     lance_nc = LanceArray.open(LANCE_BLOB_NUMCODECS_PATH)

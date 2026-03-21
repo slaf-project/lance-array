@@ -105,7 +105,7 @@ def test_reject_python_bool_scalar(img_and_view):
 def test_too_many_indices(img_and_view):
     _, view = img_and_view
     with pytest.raises(IndexError, match="too many indices"):
-        view[0, 1, 2]  # type: ignore[index]
+        view[0, 1, 2]
 
 
 def test_index_error(img_and_view):

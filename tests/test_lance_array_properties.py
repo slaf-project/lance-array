@@ -58,4 +58,4 @@ def test_decode_tile_single_payload(img_and_view) -> None:
 def test___setitem___read_only(img_and_view) -> None:
     _, view = img_and_view
     with pytest.raises(NotImplementedError, match="read-only"):
-        view[0:16, 0:12] = np.zeros((16, 12), dtype=np.uint16)  # type: ignore[misc]
+        view[0:16, 0:12] = np.zeros((16, 12), dtype=np.uint16)

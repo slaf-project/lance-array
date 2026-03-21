@@ -17,7 +17,7 @@ import json
 from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 import lance
@@ -185,16 +185,24 @@ def _build_tile_codecs(
             # blosc2 defaults typesize to 8 for plain buffers; always pass the dtype
             # itemsize (e.g. 2 for uint16) so shuffle matches numcodecs / Zarr Blosc.
             buf = data.tobytes()
-            return blosc2.compress(
-                buf,
-                typesize=typesize,
-                clevel=blosc_clevel,
-                filter=blosc2.Filter.SHUFFLE,
-                codec=codec_id,
+            return cast(
+                bytes,
+                blosc2.compress(
+                    buf,
+                    typesize=typesize,
+                    clevel=blosc_clevel,
+                    filter=blosc2.Filter.SHUFFLE,
+                    codec=codec_id,
+                ),
             )
 
         def decode_tile(blob: bytes) -> np.ndarray:
             raw = blosc2.decompress(blob)
+            if not isinstance(raw, bytes | bytearray | memoryview):
+                raise TypeError(
+                    f"blosc2.decompress expected buffer, got {type(raw).__name__}"
+                )
+            raw = bytes(raw)
             if len(raw) != nbytes:
                 raise ValueError(
                     f"decompressed tile expected {nbytes} bytes, got {len(raw)}"
@@ -351,12 +359,11 @@ def _reject_python_bool_scalar(spec: Any, *, kind: str) -> None:
 def _classify_axis(spec: Any, dim: int, *, kind: str) -> tuple[Any, ...]:
     """Return ``('scalar', i)``, ``('slice', start, stop, step)``, or ``('adv', idx)``."""
     _reject_python_bool_scalar(spec, kind=kind)
-    if isinstance(spec, (int, np.integer)):
+    if isinstance(spec, int | np.integer):
         i = int(spec) + dim if int(spec) < 0 else int(spec)
         if not 0 <= i < dim:
             raise IndexError(
-                f"index {spec} is out of bounds for axis size {dim} "
-                f"({kind} axis)"
+                f"index {spec} is out of bounds for axis size {dim} ({kind} axis)"
             )
         return ("scalar", i)
     if isinstance(spec, slice):
@@ -388,9 +395,7 @@ def _classify_axis(spec: Any, dim: int, *, kind: str) -> tuple[Any, ...]:
         adj = flat.copy()
         adj[neg] += dim
         if adj.min() < 0 or adj.max() >= dim:
-            raise IndexError(
-                f"out-of-bounds {kind} index for axis size {dim}"
-            )
+            raise IndexError(f"out-of-bounds {kind} index for axis size {dim}")
         return ("adv", t)
     raise TypeError(
         f"unsupported {kind} index type {type(spec).__name__!r} "
@@ -685,7 +690,9 @@ class LanceArray:
         blosc_clevel: int = 5,
         blosc_cname: str = "zstd",
         blob_column: str = "blob",
-        data_storage_version: str = "2.2",
+        data_storage_version: Literal[
+            "stable", "2.0", "2.1", "2.2", "2.3", "next", "legacy", "0.1"
+        ] = "2.2",
     ) -> LanceArray:
         """Write a 2D ``image`` as one encoded tile per row and return a :class:`LanceArray`.
 
@@ -842,9 +849,7 @@ class LanceArray:
             raise AssertionError("internal: expected basic row and column specs")
 
         if r_cls[0] == "scalar" and c_cls[0] == "scalar":
-            sub = self._read_subarray(
-                r_cls[1], r_cls[1] + 1, c_cls[1], c_cls[1] + 1
-            )
+            sub = self._read_subarray(r_cls[1], r_cls[1] + 1, c_cls[1], c_cls[1] + 1)
             return np.array(sub[0, 0], dtype=sub.dtype)
 
         if r_cls[0] == "scalar" and c_cls[0] == "slice":
@@ -857,11 +862,8 @@ class LanceArray:
             ci = np.arange(s, e, st, dtype=np.intp)
             if ci.size == 0:
                 return np.empty((0,), dtype=self.dtype)
-            out = _gather_at_pairs(
-                *np.broadcast_arrays(ri[:, np.newaxis], ci[np.newaxis, :]),
-                self._read_subarray,
-                self.dtype,
-            )
+            Ri, Ci = np.broadcast_arrays(ri[:, np.newaxis], ci[np.newaxis, :])
+            out = _gather_at_pairs(Ri, Ci, self._read_subarray, self.dtype)
             return np.ascontiguousarray(out[0])
 
         if r_cls[0] == "slice" and c_cls[0] == "scalar":
@@ -874,11 +876,8 @@ class LanceArray:
             ci = np.array([j], dtype=np.intp)
             if ri.size == 0:
                 return np.empty((0,), dtype=self.dtype)
-            out = _gather_at_pairs(
-                *np.broadcast_arrays(ri[:, np.newaxis], ci[np.newaxis, :]),
-                self._read_subarray,
-                self.dtype,
-            )
+            Ri, Ci = np.broadcast_arrays(ri[:, np.newaxis], ci[np.newaxis, :])
+            out = _gather_at_pairs(Ri, Ci, self._read_subarray, self.dtype)
             return np.ascontiguousarray(out[:, 0])
 
         rs, re, rst = r_cls[1], r_cls[2], r_cls[3]
@@ -939,8 +938,7 @@ class LanceArray:
         if br is not None and bc is not None:
             if int(br.shape[0]) != h or int(bc.shape[0]) != w:
                 raise IndexError(
-                    "boolean row and column masks must match array shape "
-                    f"({h}, {w})"
+                    f"boolean row and column masks must match array shape ({h}, {w})"
                 )
             return _gather_two_bool_masks(br, bc, self._read_subarray, self.dtype)
 

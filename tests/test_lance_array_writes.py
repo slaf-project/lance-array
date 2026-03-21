@@ -15,7 +15,7 @@ def test_setitem_requires_r_plus(tmp_path) -> None:
     LanceArray.to_lance(p, img, (2, 2), codec=TileCodec.RAW)
     ro = LanceArray.open(p, mode="r")
     with pytest.raises(NotImplementedError, match="read-only"):
-        ro[0:2, 0:2] = np.zeros((2, 2), dtype=np.uint16)  # type: ignore[misc]
+        ro[0:2, 0:2] = np.zeros((2, 2), dtype=np.uint16)
 
 
 def test_setitem_single_tile_full(tmp_path) -> None:
@@ -74,7 +74,7 @@ def test_setitem_empty_slice_noop(tmp_path) -> None:
     p = tmp_path / "d.lance"
     LanceArray.to_lance(p, img, (2, 2), codec=TileCodec.RAW)
     rw = LanceArray.open(p, mode="r+")
-    rw[2:2, 0:4] = np.zeros((0, 4), dtype=np.uint16)  # type: ignore[misc]
+    rw[2:2, 0:4] = np.zeros((0, 4), dtype=np.uint16)
     assert_array_equal(rw.to_numpy(), img)
 
 
@@ -84,7 +84,7 @@ def test_setitem_fancy_raises(tmp_path) -> None:
     LanceArray.to_lance(p, img, (2, 2), codec=TileCodec.RAW)
     rw = LanceArray.open(p, mode="r+")
     with pytest.raises(NotImplementedError, match="fancy"):
-        rw[[0, 1], [1, 2]] = np.array([1, 2], dtype=np.uint16)  # type: ignore[index]
+        rw[[0, 1], [1, 2]] = np.array([1, 2], dtype=np.uint16)
 
 
 def test_setitem_boolean_raises(tmp_path) -> None:
@@ -95,7 +95,7 @@ def test_setitem_boolean_raises(tmp_path) -> None:
     m = np.zeros(4, dtype=bool)
     m[:2] = True
     with pytest.raises(NotImplementedError, match="boolean"):
-        rw[m, 0:4] = 0  # type: ignore[index]
+        rw[m, 0:4] = 0
 
 
 def test_setitem_strided_slice_raises(tmp_path) -> None:
@@ -104,7 +104,7 @@ def test_setitem_strided_slice_raises(tmp_path) -> None:
     LanceArray.to_lance(p, img, (2, 2), codec=TileCodec.RAW)
     rw = LanceArray.open(p, mode="r+")
     with pytest.raises(NotImplementedError, match="step"):
-        rw[0:4:2, 0:4] = np.ones((2, 4), dtype=np.uint16)  # type: ignore[misc]
+        rw[0:4:2, 0:4] = np.ones((2, 4), dtype=np.uint16)
 
 
 def test_setitem_blosc_roundtrip(tmp_path) -> None:

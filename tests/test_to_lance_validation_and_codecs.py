@@ -87,7 +87,9 @@ def test_blosc2_roundtrip_and_slice(tmp_path) -> None:
 
 def test_blosc2_blosc_numcodecs_uint16_compression_ratio() -> None:
     """uint16 tiles: same typesize (2) and high enough zstd level → similar blob sizes."""
-    blosc2 = pytest.importorskip("blosc2", reason="needs blosc2 (e.g. lance-array[zarr])")
+    blosc2 = pytest.importorskip(
+        "blosc2", reason="needs blosc2 (e.g. lance-array[zarr])"
+    )
     from lance_array.core import _build_tile_codecs
 
     rng = np.random.default_rng(11)

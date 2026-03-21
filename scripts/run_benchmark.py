@@ -115,7 +115,9 @@ def bench_lance_reads(
     return single, batch
 
 
-def _row_ids_for_coords(view: LanceArray, coords: list[tuple[int, int]]) -> tuple[list[int], list[int]]:
+def _row_ids_for_coords(
+    view: LanceArray, coords: list[tuple[int, int]]
+) -> tuple[list[int], list[int]]:
     coord_to_row = view.coord_to_row
     row_ids_batch = [coord_to_row[c] for c in coords]
     unique_ids: list[int] = []
