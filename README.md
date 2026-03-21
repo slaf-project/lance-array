@@ -102,7 +102,11 @@ uv run python scripts/run_benchmark.py --full
 | Lance (numcodecs Blosc) | 1.78 | 0.452 | 0.024 |
 | Lance (Blosc2) | 1.78 | 0.584 | 0.019 |
 
-**Notes.** “Single” is one slice per iteration without cross-iteration caching. “Batched” prefetches unique chunks (Lance: `take_blobs` in batches; Zarr: in-memory cache), then replays the same access order—useful when amortizing object-store round trips. **Zarr** timings use the **zarrs** Rust codec pipeline (default in `run_benchmark.py` when `zarrs` is installed on Python 3.11+; pass `--no-zarrs` for zarr-python’s default pipeline). Figures are from a **local SSD**; remote latency changes the story. Re-run the scripts on your hardware before drawing conclusions.
+**Notes.** 
+- “Single” is one slice per iteration without cross-iteration caching. 
+- “Batched” prefetches unique chunks (Lance: `take_blobs` in batches; Zarr: in-memory cache), then replays the same access order—useful when amortizing object-store round trips. 
+- **Zarr** timings use the **zarrs** Rust codec pipeline (default in `run_benchmark.py` when `zarrs` is installed on Python 3.11+; pass `--no-zarrs` for zarr-python’s default pipeline). 
+- Figures are from a **local SSD**; remote latency changes the story. Re-run the scripts on your hardware before drawing conclusions.
 
 ## 🙏 Acknowledgments
 
