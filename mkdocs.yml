@@ -69,7 +69,5 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Blog:
-      - Random Access Learnings (2026-03): blog/random-access-learnings-2026-03.md
   - API Reference:
       - Core: api/core.md

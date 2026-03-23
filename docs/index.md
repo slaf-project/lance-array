@@ -184,8 +184,8 @@ Optional env: `S3_BENCHMARK_PREFIX`, `S3_BENCHMARK_ENDPOINT_URL` (see `modal_app
 
 The `run_benchmark.py --full` tables report **per-request** latencies. **Means** are easy to skew (e.g. first read / cold cache), so the charts use **p50 / p95 / p99** on a **shared x-axis**; each **horizontal facet** is one condition (single tile uncompressed/compressed, then each slice size). **Zarr** and **Lance** are paired bars per percentile; **y** is comparable across p50–p99 within each facet. Captions for methodology and data source are **below each figure**. Generated from captured benchmark output:
 
-- [`scripts/local_summary.txt`](https://github.com/slaf-project/lance-array/blob/main/scripts/local_summary.txt) — SSD → laptop  
-- [`scripts/s3_summary.txt`](https://github.com/slaf-project/lance-array/blob/main/scripts/s3_summary.txt) — object store (e.g. Tigris) → laptop  
+- [`scripts/local_summary.txt`](https://github.com/slaf-project/lance-array/blob/main/scripts/local_summary.txt) — SSD → laptop
+- [`scripts/s3_summary.txt`](https://github.com/slaf-project/lance-array/blob/main/scripts/s3_summary.txt) — object store (e.g. Tigris) → laptop
 
 Regenerate SVGs after updating those files:
 
@@ -203,10 +203,6 @@ uv run python scripts/render_benchmark_charts.py
 ![Full benchmark S3 → laptop — p50 / p95 / p99 per request](images/benchmarks/benchmark_s3_p50_p95_p99.svg)
 
 *Caption — **object store → laptop**:* Same layout and comparisons as above. Source: [`scripts/s3_summary.txt`](https://github.com/slaf-project/lance-array/blob/main/scripts/s3_summary.txt).
-
-### Benchmark notes and learnings
-
-- Detailed March 2026 write-up: [Random Access Learnings (March 2026)](blog/random-access-learnings-2026-03.md)
 
 ## API reference
 
