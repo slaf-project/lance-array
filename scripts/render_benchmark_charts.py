@@ -2,8 +2,8 @@
 """Build Zarr vs Lance bar charts from Rich-style benchmark summary text.
 
 **Layout:** One **row per condition** (facet). **X-axis** = p50, p95, p99 (each a Zarr+Lance
-pair). **Legend** is horizontal above the first panel. **Figure captions** live in
-`README.md` and `docs/index.md` under each image (not in the SVG).
+pair). **Legend** is horizontal in the figure margin (below suptitle, above panels).
+**Figure captions** live in `README.md` and `docs/index.md` under each image (not in the SVG).
 
   uv sync --extra dev
   uv run python scripts/render_benchmark_charts.py
@@ -48,7 +48,10 @@ def parse_best_case_table(text: str) -> dict[tuple[str, str], dict[str, float]]:
     out: dict[tuple[str, str], dict[str, float]] = {}
     in_first = False
     for line in text.splitlines():
-        if "Best-case Zarr vs Lance" in line or "best-case Zarr vs Lance" in line.lower():
+        if (
+            "Best-case Zarr vs Lance" in line
+            or "best-case Zarr vs Lance" in line.lower()
+        ):
             in_first = True
             continue
         if in_first and ("Morton vs Row Ordering" in line or "Morton vs row" in line):
@@ -68,7 +71,9 @@ def parse_best_case_table(text: str) -> dict[tuple[str, str], dict[str, float]]:
     return out
 
 
-def parse_slice_scaling_table(text: str) -> list[tuple[int, dict[str, float], dict[str, float]]]:
+def parse_slice_scaling_table(
+    text: str,
+) -> list[tuple[int, dict[str, float], dict[str, float]]]:
     out: list[tuple[int, dict[str, float], dict[str, float]]] = []
     in_table = False
     for line in text.splitlines():
@@ -161,7 +166,8 @@ def render_figure(
     n = len(facets)
     # Narrow width (only 3 percentile groups on x); taller rows per facet.
     fig_w = 4.85
-    fig_h = max(2.5, 1.85 * n + 1.2)
+    # Extra height: room for suptitle + figure-level legend above subplot block.
+    fig_h = max(2.65, 1.88 * n + 1.35)
     fig, axes = plt.subplots(
         n,
         1,
@@ -206,24 +212,27 @@ def render_figure(
         Patch(facecolor=z_color, edgecolor="white", linewidth=0.5, label="Zarr"),
         Patch(facecolor=l_color, edgecolor="white", linewidth=0.5, label="Lance"),
     ]
-    axes[0].legend(
+
+    # Suptitle + legend in figure coordinates so the legend does not sit on the
+    # first panel's facet title (axes-coords bbox_to_anchor above 1.0 collides).
+    fig.suptitle(suptitle, fontsize=12, fontweight="600", y=0.97)
+    fig.legend(
         handles=legend_el,
         loc="lower center",
-        bbox_to_anchor=(0.5, 1.02),
+        bbox_to_anchor=(0.5, 0.915),
+        bbox_transform=fig.transFigure,
         ncol=2,
         frameon=False,
         fontsize=9,
         columnspacing=1.8,
         handletextpad=0.5,
     )
-
-    fig.suptitle(suptitle, fontsize=12, fontweight="600", y=0.99)
     fig.subplots_adjust(
         left=0.18,
         right=0.98,
-        top=0.82,
+        top=0.78,
         bottom=0.1,
-        hspace=0.5,
+        hspace=0.52,
     )
 
     outfile.parent.mkdir(parents=True, exist_ok=True)
@@ -261,7 +270,9 @@ def main() -> None:
             outfile=out / name,
         )
 
-    print(f"Wrote:\n  {out / 'benchmark_local_p50_p95_p99.svg'}\n  {out / 'benchmark_s3_p50_p95_p99.svg'}")
+    print(
+        f"Wrote:\n  {out / 'benchmark_local_p50_p95_p99.svg'}\n  {out / 'benchmark_s3_p50_p95_p99.svg'}"
+    )
 
 
 if __name__ == "__main__":
