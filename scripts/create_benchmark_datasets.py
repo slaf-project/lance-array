@@ -40,9 +40,12 @@ ZARR_BLOSC_PATH = WORK_DIR / "tiles_blosc.zarr"
 LANCE_BLOB_RAW_PATH = WORK_DIR / "tiles_raw.lance"
 LANCE_BLOB_BLOSC2_PATH = WORK_DIR / "tiles_blosc2.lance"
 LANCE_BLOB_NUMCODECS_PATH = WORK_DIR / "tiles_numcodecs_blosc.lance"
+LANCE_BLOB_RAW_MORTON_PATH = WORK_DIR / "tiles_raw_morton.lance"
+LANCE_BLOB_BLOSC2_MORTON_PATH = WORK_DIR / "tiles_blosc2_morton.lance"
+LANCE_BLOB_NUMCODECS_MORTON_PATH = WORK_DIR / "tiles_numcodecs_blosc_morton.lance"
 
 IMAGE_URL = "https://picsum.photos/seed/lance-array-bench/2048/2048"
-CHUNK_SHAPE = (256, 256)
+CHUNK_SHAPE = (64, 64)
 TYPESIZE = 2
 # ZSTD: python-blosc2 often keeps chunks uncompressed at clevel <= 5 while numcodecs
 # still compresses; 6+ is a closer match for fair on-disk comparison.
@@ -117,6 +120,7 @@ def write_test_lance(img: np.ndarray, path: Path) -> LanceArray:
         blosc_typesize=TYPESIZE,
         blosc_clevel=CLEVEL,
         blosc_cname="zstd",
+        tile_order="row_major",
     )
 
 
@@ -140,6 +144,9 @@ def create_full_suite(img: np.ndarray) -> None:
         LANCE_BLOB_RAW_PATH,
         LANCE_BLOB_BLOSC2_PATH,
         LANCE_BLOB_NUMCODECS_PATH,
+        LANCE_BLOB_RAW_MORTON_PATH,
+        LANCE_BLOB_BLOSC2_MORTON_PATH,
+        LANCE_BLOB_NUMCODECS_MORTON_PATH,
     ):
         if p.exists():
             shutil.rmtree(p)
@@ -172,7 +179,13 @@ def create_full_suite(img: np.ndarray) -> None:
 
     ch0, ch1 = CHUNK_SHAPE
     print(f"Writing Lance raw → {LANCE_BLOB_RAW_PATH} ...")
-    LanceArray.to_lance(LANCE_BLOB_RAW_PATH, img, CHUNK_SHAPE, codec=TileCodec.RAW)
+    LanceArray.to_lance(
+        LANCE_BLOB_RAW_PATH,
+        img,
+        CHUNK_SHAPE,
+        codec=TileCodec.RAW,
+        tile_order="row_major",
+    )
     print(f"  on-disk: {dir_byte_size(LANCE_BLOB_RAW_PATH) / (1024 * 1024):.2f} MiB")
 
     print(
@@ -187,6 +200,7 @@ def create_full_suite(img: np.ndarray) -> None:
         blosc_typesize=TYPESIZE,
         blosc_clevel=CLEVEL,
         blosc_cname="zstd",
+        tile_order="row_major",
     )
     print(f"  on-disk: {dir_byte_size(LANCE_BLOB_BLOSC2_PATH) / (1024 * 1024):.2f} MiB")
 
@@ -202,9 +216,58 @@ def create_full_suite(img: np.ndarray) -> None:
         blosc_typesize=TYPESIZE,
         blosc_clevel=CLEVEL,
         blosc_cname="zstd",
+        tile_order="row_major",
     )
     print(
         f"  on-disk: {dir_byte_size(LANCE_BLOB_NUMCODECS_PATH) / (1024 * 1024):.2f} MiB"
+    )
+
+    print(f"Writing Lance raw (Morton order) → {LANCE_BLOB_RAW_MORTON_PATH} ...")
+    LanceArray.to_lance(
+        LANCE_BLOB_RAW_MORTON_PATH,
+        img,
+        CHUNK_SHAPE,
+        codec=TileCodec.RAW,
+        tile_order="morton",
+    )
+    print(
+        f"  on-disk: {dir_byte_size(LANCE_BLOB_RAW_MORTON_PATH) / (1024 * 1024):.2f} MiB"
+    )
+
+    print(
+        f"Writing Lance Blosc2 (Morton order) (python-blosc2 {blosc2.__version__}) → "
+        f"{LANCE_BLOB_BLOSC2_MORTON_PATH} ..."
+    )
+    LanceArray.to_lance(
+        LANCE_BLOB_BLOSC2_MORTON_PATH,
+        img,
+        CHUNK_SHAPE,
+        codec=TileCodec.BLOSC2,
+        blosc_typesize=TYPESIZE,
+        blosc_clevel=CLEVEL,
+        blosc_cname="zstd",
+        tile_order="morton",
+    )
+    print(
+        f"  on-disk: {dir_byte_size(LANCE_BLOB_BLOSC2_MORTON_PATH) / (1024 * 1024):.2f} MiB"
+    )
+
+    print(
+        f"Writing Lance numcodecs Blosc (Morton order) (numcodecs {numcodecs.__version__}) → "
+        f"{LANCE_BLOB_NUMCODECS_MORTON_PATH} ..."
+    )
+    LanceArray.to_lance(
+        LANCE_BLOB_NUMCODECS_MORTON_PATH,
+        img,
+        CHUNK_SHAPE,
+        codec=TileCodec.BLOSC_NUMCODECS,
+        blosc_typesize=TYPESIZE,
+        blosc_clevel=CLEVEL,
+        blosc_cname="zstd",
+        tile_order="morton",
+    )
+    print(
+        f"  on-disk: {dir_byte_size(LANCE_BLOB_NUMCODECS_MORTON_PATH) / (1024 * 1024):.2f} MiB"
     )
 
     _r = img.shape[0] // 2 // ch0 * ch0
@@ -219,9 +282,15 @@ def create_full_suite(img: np.ndarray) -> None:
     lance_raw = LanceArray.open(LANCE_BLOB_RAW_PATH)
     lance_nc = LanceArray.open(LANCE_BLOB_NUMCODECS_PATH)
     lance_b2 = LanceArray.open(LANCE_BLOB_BLOSC2_PATH)
+    lance_raw_morton = LanceArray.open(LANCE_BLOB_RAW_MORTON_PATH)
+    lance_nc_morton = LanceArray.open(LANCE_BLOB_NUMCODECS_MORTON_PATH)
+    lance_b2_morton = LanceArray.open(LANCE_BLOB_BLOSC2_MORTON_PATH)
     assert np.array_equal(z_tile, lance_raw[_r : _r + ch0, _c : _c + ch1])
     assert np.array_equal(z_tile, lance_nc[_r : _r + ch0, _c : _c + ch1])
     assert np.array_equal(z_tile, lance_b2[_r : _r + ch0, _c : _c + ch1])
+    assert np.array_equal(z_tile, lance_raw_morton[_r : _r + ch0, _c : _c + ch1])
+    assert np.array_equal(z_tile, lance_nc_morton[_r : _r + ch0, _c : _c + ch1])
+    assert np.array_equal(z_tile, lance_b2_morton[_r : _r + ch0, _c : _c + ch1])
 
 
 def main() -> None:

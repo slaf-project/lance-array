@@ -14,7 +14,9 @@ open with ``mode="r+"`` and assign with basic indices (see `LanceArray.open`).
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -250,6 +252,62 @@ def normalize_chunk_slices(s: slice, dim: int) -> tuple[int, int]:
 _TAKE_BLOBS_BATCH = 512
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+_DECODE_WORKERS = max(1, _env_int("LANCE_ARRAY_DECODE_WORKERS", os.cpu_count() or 1))
+_PARALLEL_DECODE_MIN = max(1, _env_int("LANCE_ARRAY_PARALLEL_DECODE_MIN", 8))
+_TILE_ROW_COL = "tile_row"
+_TILE_COL_COL = "tile_col"
+
+
+def _pack_tile_coord(i: int, j: int) -> int:
+    """Pack a 2D tile coordinate into one integer key."""
+    return (int(i) << 32) | int(j)
+
+
+def _morton_code(i: int, j: int) -> int:
+    """Interleave bits of two 32-bit integers into one 64-bit Morton code."""
+
+    def _spread_32(x: int) -> int:
+        x &= 0xFFFFFFFF
+        x = (x | (x << 16)) & 0x0000FFFF0000FFFF
+        x = (x | (x << 8)) & 0x00FF00FF00FF00FF
+        x = (x | (x << 4)) & 0x0F0F0F0F0F0F0F0F
+        x = (x | (x << 2)) & 0x3333333333333333
+        x = (x | (x << 1)) & 0x5555555555555555
+        return x
+
+    return _spread_32(i) | (_spread_32(j) << 1)
+
+
+def _hilbert_code(i: int, j: int, *, bits: int) -> int:
+    """Compute 2D Hilbert curve index for integer coordinates."""
+    if bits < 1:
+        return 0
+    x = int(i)
+    y = int(j)
+    h = 0
+    mask = (1 << bits) - 1
+    for s in range(bits - 1, -1, -1):
+        rx = (x >> s) & 1
+        ry = (y >> s) & 1
+        h |= ((3 * rx) ^ ry) << (2 * s)
+        if ry == 0:
+            if rx == 1:
+                x = (~x) & mask
+                y = (~y) & mask
+            x, y = y, x
+    return h
+
+
 def _write_lance_manifest(
     root: Path,
     *,
@@ -261,6 +319,7 @@ def _write_lance_manifest(
     blosc_typesize: int | None,
     blosc_clevel: int,
     blosc_cname: str,
+    payload_layout: Literal["blob", "bytes"],
 ) -> None:
     dt = np.dtype(dtype)
     payload: dict[str, Any] = {
@@ -271,6 +330,7 @@ def _write_lance_manifest(
         "dtype": dt.str,
         "blob_column": blob_column,
         "codec": codec.value,
+        "payload_layout": payload_layout,
     }
     if codec in (TileCodec.BLOSC_NUMCODECS, TileCodec.BLOSC2):
         payload["blosc_typesize"] = int(
@@ -283,18 +343,31 @@ def _write_lance_manifest(
     )
 
 
-def _load_coord_mapping(ds: lance.LanceDataset) -> dict[tuple[int, int], int]:
+def _detect_coord_columns(ds: lance.LanceDataset) -> tuple[str, str]:
+    names = set(ds.schema.names)
+    if _TILE_ROW_COL in names and _TILE_COL_COL in names:
+        return _TILE_ROW_COL, _TILE_COL_COL
+    if "i" in names and "j" in names:
+        return "i", "j"
+    raise ValueError(
+        f"dataset is missing tile coordinate columns; expected "
+        f"('{_TILE_ROW_COL}','{_TILE_COL_COL}') or ('i','j')"
+    )
+
+
+def _load_coord_mapping(
+    ds: lance.LanceDataset, *, row_col: str, col_col: str
+) -> dict[tuple[int, int], int]:
     """Map tile ``(i, j)`` to **positional** row index for ``take_blobs``.
 
-    Positions follow ``to_table(columns=[\"i\", \"j\"])`` row order. This must not
-    use the ``row_id`` column: after merge-insert, physical order can differ from
-    stored ``row_id`` while ``take_blobs(indices=…)`` is positional.
+    Positions follow ``to_table(columns=[row_col, col_col])`` row order and are
+    used for blob/bytes positional fetch APIs.
     """
-    tbl = ds.to_table(columns=["i", "j"])
+    tbl = ds.to_table(columns=[row_col, col_col])
     coord_to_row: dict[tuple[int, int], int] = {}
     for pos in range(tbl.num_rows):
-        ti = int(tbl["i"][pos].as_py())
-        tj = int(tbl["j"][pos].as_py())
+        ti = int(tbl[row_col][pos].as_py())
+        tj = int(tbl[col_col][pos].as_py())
         coord_to_row[(ti, tj)] = pos
     return coord_to_row
 
@@ -549,16 +622,6 @@ def _combine_for_advanced(
     raise AssertionError("unreachable")
 
 
-def _stored_row_id_by_tile(ds: lance.LanceDataset) -> dict[tuple[int, int], int]:
-    """``(i, j)`` → ``row_id`` column value (for merge-insert source rows)."""
-    snap = ds.to_table(columns=["row_id", "i", "j"])
-    out: dict[tuple[int, int], int] = {}
-    for row in range(snap.num_rows):
-        ij = (int(snap["i"][row].as_py()), int(snap["j"][row].as_py()))
-        out[ij] = int(snap["row_id"][row].as_py())
-    return out
-
-
 def _basic_setitem_meshes(
     r_cls: tuple[Any, ...], c_cls: tuple[Any, ...]
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -644,6 +707,9 @@ class LanceArray:
         decode_tile: Callable[[bytes], np.ndarray],
         *,
         blob_column: str = "blob",
+        payload_layout: Literal["blob", "bytes"] = "blob",
+        tile_row_col: str = _TILE_ROW_COL,
+        tile_col_col: str = _TILE_COL_COL,
         dtype: np.dtype | None = None,
         encode_tile: Callable[[np.ndarray], bytes] | None = None,
     ) -> None:
@@ -677,9 +743,30 @@ class LanceArray:
             np.dtype(dtype) if dtype is not None else np.dtype(np.uint16)
         )
         self._coord_to_row = coord_to_row
+        self._coord_to_row_packed: dict[int, int] = {
+            _pack_tile_coord(ti, tj): rid for (ti, tj), rid in coord_to_row.items()
+        }
         self._decode_tile = decode_tile
         self._encode_tile = encode_tile
         self._blob_column = blob_column
+        self._payload_layout: Literal["blob", "bytes"] = payload_layout
+        self._tile_row_col = tile_row_col
+        self._tile_col_col = tile_col_col
+
+    def _row_for_tile(self, ti: int, tj: int) -> int:
+        """Return positional row index for one tile coordinate."""
+        key = _pack_tile_coord(ti, tj)
+        try:
+            return self._coord_to_row_packed[key]
+        except KeyError as e:
+            raise KeyError(
+                f"missing tile ({ti}, {tj}) in pinned index "
+                f"for shape={self.shape}, chunks={self.chunks}"
+            ) from e
+
+    def _decode_blob_file(self, blob_file: Any) -> np.ndarray:
+        """Read and decode one blob file handle."""
+        return self._decode_tile(blob_file.read())
 
     @property
     def ndim(self) -> int:
@@ -739,7 +826,13 @@ class LanceArray:
         shape = (int(data["shape"][0]), int(data["shape"][1]))
         chunk_shape = (int(data["chunk_shape"][0]), int(data["chunk_shape"][1]))
         dtype = np.dtype(data["dtype"])
-        blob_column = str(data["blob_column"])
+        blob_column = str(data.get("blob_column", "blob"))
+        payload_layout = str(data.get("payload_layout", "blob")).strip().lower()
+        if payload_layout not in ("blob", "bytes"):
+            raise ValueError(
+                f"invalid payload_layout {payload_layout!r} in manifest "
+                "(expected 'blob' or 'bytes')"
+            )
         codec = _coerce_tile_codec(data["codec"])
         blosc_typesize = data.get("blosc_typesize")
         if blosc_typesize is not None:
@@ -755,7 +848,10 @@ class LanceArray:
             blosc_cname=blosc_cname,
         )
         ds = lance.dataset(dataset_uri)
-        coord_to_row = _load_coord_mapping(ds)
+        tile_row_col, tile_col_col = _detect_coord_columns(ds)
+        coord_to_row = _load_coord_mapping(
+            ds, row_col=tile_row_col, col_col=tile_col_col
+        )
         ch0, ch1 = chunk_shape
         expected_tiles = (shape[0] // ch0) * (shape[1] // ch1)
         if len(coord_to_row) != expected_tiles:
@@ -771,6 +867,9 @@ class LanceArray:
             coord_to_row,
             dec,
             blob_column=blob_column,
+            payload_layout=cast(Literal["blob", "bytes"], payload_layout),
+            tile_row_col=tile_row_col,
+            tile_col_col=tile_col_col,
             dtype=dtype,
             encode_tile=encode_tile,
         )
@@ -786,16 +885,20 @@ class LanceArray:
         blosc_typesize: int | None = None,
         blosc_clevel: int = 5,
         blosc_cname: str = "zstd",
-        blob_column: str = "blob",
+        blob_column: str = "payload",
         data_storage_version: Literal[
             "stable", "2.0", "2.1", "2.2", "2.3", "next", "legacy", "0.1"
         ] = "2.2",
+        tile_order: Literal["row_major", "morton", "hilbert"] = "morton",
+        payload_layout: Literal["blob", "bytes"] = "bytes",
     ) -> LanceArray:
         """Write a 2D ``image`` as one encoded tile per row and return a `LanceArray`.
 
-        The on-disk table has columns ``row_id``, ``i``, ``j`` (tile indices), and
-        a blob column (default name ``blob``, blob v2). A sidecar ``lance_array.json``
-        stores shape, chunk grid, dtype, and codec parameters so `LanceArray.open` works.
+        The on-disk table stores tile coordinates (default columns
+        ``tile_row``, ``tile_col``), ``morton_code``, and an encoded payload
+        column (blob-v2 or large-binary bytes depending on ``payload_layout``).
+        A sidecar ``lance_array.json`` stores shape, chunk grid, dtype, and codec
+        parameters so `LanceArray.open` works.
 
         Pass ``codec=`` as `TileCodec` or a string alias (``\"raw\"``,
         ``\"blosc_numcodecs\"``, ``\"blosc2\"``). Blosc presets use ``blosc_typesize``
@@ -823,6 +926,11 @@ class LanceArray:
             Name of the blob column in the Lance schema.
         data_storage_version
             Passed to ``lance.write_dataset``.
+        tile_order
+            Physical insertion order of tiles in the Lance table. ``"row_major"``
+            writes ``(i, j)`` in nested-loop order; ``"morton"`` writes by Morton
+            (Z-order) code and ``"hilbert"`` writes by Hilbert code to improve
+            2D spatial locality for rectangular range reads.
 
         Returns
         -------
@@ -855,42 +963,55 @@ class LanceArray:
             )
 
         rows, cols = h // ch0, w // ch1
+        if tile_order not in ("row_major", "morton", "hilbert"):
+            raise ValueError(
+                "unknown tile_order "
+                f"{tile_order!r}; expected 'row_major', 'morton', or 'hilbert'"
+            )
+        if payload_layout not in ("blob", "bytes"):
+            raise ValueError(
+                f"unknown payload_layout {payload_layout!r}; expected 'blob' or 'bytes'"
+            )
+        tile_coords = [(ti, tj) for ti in range(rows) for tj in range(cols)]
+        if tile_order == "morton":
+            tile_coords.sort(key=lambda ij: _morton_code(ij[0], ij[1]))
+        elif tile_order == "hilbert":
+            bits = max(1, max(rows, cols).bit_length())
+            tile_coords.sort(key=lambda ij: _hilbert_code(ij[0], ij[1], bits=bits))
         coord_to_row: dict[tuple[int, int], int] = {}
         i_list: list[int] = []
         j_list: list[int] = []
-        row_ids: list[int] = []
+        morton_codes: list[int] = []
         blob_bytes: list[bytes] = []
 
-        row_id = 0
-        for ti in range(rows):
-            for tj in range(cols):
-                r0 = ti * ch0
-                c0 = tj * ch1
-                tile = image[r0 : r0 + ch0, c0 : c0 + ch1]
-                blob_bytes.append(enc(tile))
-                i_list.append(ti)
-                j_list.append(tj)
-                row_ids.append(row_id)
-                coord_to_row[(ti, tj)] = row_id
-                row_id += 1
+        for row_id, (ti, tj) in enumerate(tile_coords):
+            r0 = ti * ch0
+            c0 = tj * ch1
+            tile = image[r0 : r0 + ch0, c0 : c0 + ch1]
+            blob_bytes.append(enc(tile))
+            i_list.append(ti)
+            j_list.append(tj)
+            morton_codes.append(_morton_code(ti, tj))
+            coord_to_row[(ti, tj)] = row_id
 
-        schema = pa.schema(
-            [
-                pa.field("row_id", pa.int64()),
-                pa.field("i", pa.int32()),
-                pa.field("j", pa.int32()),
-                blob_field(blob_column),
-            ]
-        )
-        table = pa.table(
-            {
-                "row_id": pa.array(row_ids, type=pa.int64()),
-                "i": pa.array(i_list, type=pa.int32()),
-                "j": pa.array(j_list, type=pa.int32()),
-                blob_column: blob_array(blob_bytes),
-            },
-            schema=schema,
-        )
+        fields: list[pa.Field] = [
+            pa.field(_TILE_ROW_COL, pa.uint32()),
+            pa.field(_TILE_COL_COL, pa.uint32()),
+            pa.field("morton_code", pa.uint64()),
+        ]
+        arrays: dict[str, pa.Array] = {
+            _TILE_ROW_COL: pa.array(i_list, type=pa.uint32()),
+            _TILE_COL_COL: pa.array(j_list, type=pa.uint32()),
+            "morton_code": pa.array(morton_codes, type=pa.uint64()),
+        }
+        if payload_layout == "blob":
+            fields.append(blob_field(blob_column))
+            arrays[blob_column] = blob_array(blob_bytes)
+        else:
+            fields.append(pa.field(blob_column, pa.large_binary()))
+            arrays[blob_column] = pa.array(blob_bytes, type=pa.large_binary())
+        schema = pa.schema(fields)
+        table = pa.table(arrays, schema=schema)
         lance.write_dataset(table, str(path), data_storage_version=data_storage_version)
         root = Path(path)
         tc = _coerce_tile_codec(codec)
@@ -904,6 +1025,7 @@ class LanceArray:
             blosc_typesize=blosc_typesize,
             blosc_clevel=blosc_clevel,
             blosc_cname=blosc_cname,
+            payload_layout=payload_layout,
         )
         ds = lance.dataset(str(path))
         return cls(
@@ -913,6 +1035,9 @@ class LanceArray:
             coord_to_row,
             dec,
             blob_column=blob_column,
+            payload_layout=payload_layout,
+            tile_row_col=_TILE_ROW_COL,
+            tile_col_col=_TILE_COL_COL,
             dtype=np.dtype(image.dtype),
             encode_tile=None,
         )
@@ -938,6 +1063,11 @@ class LanceArray:
             Blob v2 column name (default ``\"blob\"`` unless overridden at write).
         """
         return self._blob_column
+
+    @property
+    def payload_layout(self) -> Literal["blob", "bytes"]:
+        """Physical payload layout for encoded tiles."""
+        return self._payload_layout
 
     @property
     def dataset(self) -> lance.LanceDataset:
@@ -1045,24 +1175,61 @@ class LanceArray:
         i_start, i_end = r0 // ch0, (r1 - 1) // ch0
         j_start, j_end = c0 // ch1, (c1 - 1) // ch1
 
+        tile_rows = i_end - i_start + 1
+        tile_cols = j_end - j_start + 1
+        rid_grid: list[list[int]] = []
         rids_ordered: list[int] = []
         for ti in range(i_start, i_end + 1):
+            row: list[int] = []
             for tj in range(j_start, j_end + 1):
-                rids_ordered.append(self._coord_to_row[(ti, tj)])
+                rid = self._row_for_tile(ti, tj)
+                row.append(rid)
+                rids_ordered.append(rid)
+            rid_grid.append(row)
 
         unique_sorted = sorted(set(rids_ordered))
         blob_cache: dict[int, np.ndarray] = {}
         col = self._blob_column
-        for k in range(0, len(unique_sorted), _TAKE_BLOBS_BATCH):
-            batch = unique_sorted[k : k + _TAKE_BLOBS_BATCH]
-            files = self._ds.take_blobs(col, indices=batch)
-            for rid, f in zip(batch, files, strict=True):
-                blob_cache[rid] = self._decode_tile(f.read())
+        if self._payload_layout == "bytes":
+            for k in range(0, len(unique_sorted), _TAKE_BLOBS_BATCH):
+                batch = unique_sorted[k : k + _TAKE_BLOBS_BATCH]
+                tbl = self._ds.take(indices=batch, columns=[col])
+                payload_col = tbl[col]
+                for idx, rid in enumerate(batch):
+                    blob_cache[rid] = self._decode_tile(payload_col[idx].as_py())
+        else:
+            pool: ThreadPoolExecutor | None = None
+            for k in range(0, len(unique_sorted), _TAKE_BLOBS_BATCH):
+                batch = unique_sorted[k : k + _TAKE_BLOBS_BATCH]
+                files = list(self._ds.take_blobs(col, indices=batch))
+                if _DECODE_WORKERS > 1 and len(batch) >= _PARALLEL_DECODE_MIN:
+                    if pool is None:
+                        pool = ThreadPoolExecutor(max_workers=_DECODE_WORKERS)
+                    tiles = list(pool.map(self._decode_blob_file, files))
+                    for rid, tile in zip(batch, tiles, strict=True):
+                        blob_cache[rid] = tile
+                else:
+                    for rid, f in zip(batch, files, strict=True):
+                        blob_cache[rid] = self._decode_tile(f.read())
+            if pool is not None:
+                pool.shutdown(wait=True)
 
-        for ti in range(i_start, i_end + 1):
-            for tj in range(j_start, j_end + 1):
-                rid = self._coord_to_row[(ti, tj)]
-                tile = blob_cache[rid]
+        # Hot path for slice-scaling windows: exact chunk boundaries, no edge cropping.
+        if r0 % ch0 == 0 and c0 % ch1 == 0 and r1 % ch0 == 0 and c1 % ch1 == 0:
+            for ii in range(tile_rows):
+                dr0, dr1 = ii * ch0, (ii + 1) * ch0
+                row = rid_grid[ii]
+                for jj in range(tile_cols):
+                    dc0, dc1 = jj * ch1, (jj + 1) * ch1
+                    out[dr0:dr1, dc0:dc1] = blob_cache[row[jj]]
+            return out
+
+        for ii in range(tile_rows):
+            ti = i_start + ii
+            row = rid_grid[ii]
+            for jj in range(tile_cols):
+                tj = j_start + jj
+                tile = blob_cache[row[jj]]
                 R0, C0 = ti * ch0, tj * ch1
                 R1, C1 = R0 + ch0, C0 + ch1
                 tr0, tr1 = max(r0, R0), min(r1, R1)
@@ -1080,8 +1247,9 @@ class LanceArray:
     def __getitem__(self, key: Any) -> np.ndarray:
         """Read a scalar, slice, or advanced subregion (NumPy 2D semantics).
 
-        Overlapping tiles are fetched via batched ``take_blobs``, decoded, and
-        stitched (including strided slices and partial edge windows).
+        Overlapping tiles are fetched via batched payload reads (blob handles or
+        direct bytes), decoded, and stitched (including strided slices and
+        partial edge windows).
 
         Parameters
         ----------
@@ -1125,43 +1293,51 @@ class LanceArray:
     def _merge_update_tiles(
         self,
         tile_arrays: dict[tuple[int, int], np.ndarray],
-        *,
-        ij_to_stored_row_id: dict[tuple[int, int], int],
     ) -> None:
         """Persist encoded tiles via Lance merge-insert on ``(i, j)``."""
         if not tile_arrays:
             return
         col = self._blob_column
+        names = set(self._ds.schema.names)
+        has_morton = "morton_code" in names
+        morton_codes: list[int] = []
         assert self._encode_tile is not None
         i_list: list[int] = []
         j_list: list[int] = []
-        rid_list: list[int] = []
         blob_bytes: list[bytes] = []
         for (ti, tj), arr in sorted(tile_arrays.items()):
             i_list.append(ti)
             j_list.append(tj)
-            rid_list.append(ij_to_stored_row_id[(ti, tj)])
             blob_bytes.append(self._encode_tile(arr))
-        schema = pa.schema(
-            [
-                pa.field("row_id", pa.int64()),
-                pa.field("i", pa.int32()),
-                pa.field("j", pa.int32()),
-                blob_field(col),
-            ]
-        )
-        table = pa.table(
-            {
-                "row_id": pa.array(rid_list, type=pa.int64()),
-                "i": pa.array(i_list, type=pa.int32()),
-                "j": pa.array(j_list, type=pa.int32()),
-                col: blob_array(blob_bytes),
-            },
-            schema=schema,
-        )
-        self._ds.merge_insert(["i", "j"]).when_matched_update_all().execute(table)
+            if has_morton:
+                morton_codes.append(_morton_code(ti, tj))
+        fields: list[pa.Field] = [
+            pa.field(self._tile_row_col, pa.uint32()),
+            pa.field(self._tile_col_col, pa.uint32()),
+        ]
+        arrays: dict[str, pa.Array] = {
+            self._tile_row_col: pa.array(i_list, type=pa.uint32()),
+            self._tile_col_col: pa.array(j_list, type=pa.uint32()),
+        }
+        if has_morton:
+            fields.append(pa.field("morton_code", pa.uint64()))
+            arrays["morton_code"] = pa.array(morton_codes, type=pa.uint64())
+        if self._payload_layout == "blob":
+            fields.append(blob_field(col))
+            arrays[col] = blob_array(blob_bytes)
+        else:
+            fields.append(pa.field(col, pa.large_binary()))
+            arrays[col] = pa.array(blob_bytes, type=pa.large_binary())
+        schema = pa.schema(fields)
+        table = pa.table(arrays, schema=schema)
+        self._ds.merge_insert([self._tile_row_col, self._tile_col_col]).when_matched_update_all().execute(table)
         self._ds = lance.dataset(self._ds.uri)
-        self._coord_to_row = _load_coord_mapping(self._ds)
+        self._coord_to_row = _load_coord_mapping(
+            self._ds, row_col=self._tile_row_col, col_col=self._tile_col_col
+        )
+        self._coord_to_row_packed = {
+            _pack_tile_coord(ti, tj): rid for (ti, tj), rid in self._coord_to_row.items()
+        }
 
     def __setitem__(self, key: Any, value: Any) -> None:
         """Write through basic indices only (``r+`` mode).
@@ -1207,7 +1383,6 @@ class LanceArray:
             return
         V = np.broadcast_to(np.asarray(value, dtype=self.dtype), Ri.shape)
         ch0, ch1 = self.chunks
-        ij_to_stored = _stored_row_id_by_tile(self._ds)
         tile_keys = {
             (int(r) // ch0, int(c) // ch1)
             for r, c in zip(Ri.ravel(), Ci.ravel(), strict=True)
@@ -1215,15 +1390,18 @@ class LanceArray:
         tiles_work: dict[tuple[int, int], np.ndarray] = {}
         col = self._blob_column
         for ti, tj in tile_keys:
-            pos = self._coord_to_row[(ti, tj)]
-            raw = self._ds.take_blobs(col, indices=[pos])[0].read()
+            pos = self._row_for_tile(ti, tj)
+            if self._payload_layout == "bytes":
+                raw = self._ds.take(indices=[pos], columns=[col])[col][0].as_py()
+            else:
+                raw = self._ds.take_blobs(col, indices=[pos])[0].read()
             tiles_work[(ti, tj)] = self._decode_tile(raw).copy()
         for idx in np.ndindex(Ri.shape):
             r, c = int(Ri[idx]), int(Ci[idx])
             ti, tj = r // ch0, c // ch1
             R0, C0 = ti * ch0, tj * ch1
             tiles_work[(ti, tj)][r - R0, c - C0] = V[idx]
-        self._merge_update_tiles(tiles_work, ij_to_stored_row_id=ij_to_stored)
+        self._merge_update_tiles(tiles_work)
 
     def to_numpy(self) -> np.ndarray:
         """Decode all tiles and return the full raster (single batched read path).

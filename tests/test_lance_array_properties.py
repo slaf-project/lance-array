@@ -42,14 +42,19 @@ def test_coord_to_row_covers_grid(img_and_view) -> None:
 
 def test_blob_column_and_dataset(img_and_view) -> None:
     _, view = img_and_view
-    assert view.blob_column == "blob"
+    assert view.blob_column == "payload"
     assert view.dataset is not None
 
 
 def test_decode_tile_single_payload(img_and_view) -> None:
     image, view = img_and_view
     rid = view.coord_to_row[(0, 0)]
-    raw = view.dataset.take_blobs(view.blob_column, indices=[rid])[0].read()
+    try:
+        raw = view.dataset.take_blobs(view.blob_column, indices=[rid])[0].read()
+    except ValueError:
+        raw = view.dataset.take(indices=[rid], columns=[view.blob_column])[view.blob_column][
+            0
+        ].as_py()
     tile = view.decode_tile(raw)
     assert tile.shape == view.chunks
     assert_array_equal(tile, _tile_from_image(image, 0, 0, view.chunks))

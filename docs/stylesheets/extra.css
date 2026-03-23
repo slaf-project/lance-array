@@ -69,3 +69,9 @@
   font-weight: 600;
   color: var(--md-primary-fg-color);
 }
+
+/* Benchmark SVGs (wide figures) */
+.md-content img[src*="benchmark_"] {
+  max-width: 100%;
+  height: auto;
+}

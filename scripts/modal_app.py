@@ -14,7 +14,7 @@ Optional env (override defaults):
 
 Usage::
 
-    modal run modal_app.py
+    modal run scripts/modal_app.py
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import modal
 
-_REPO_ROOT = Path(__file__).resolve().parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _BENCH_IMAGE = (
     modal.Image.debian_slim(python_version="3.12")
@@ -40,7 +40,9 @@ _BENCH_IMAGE = (
         "s3fs>=2024.1.0",
         "zarrs>=0.2.0",
     )
-    .add_local_dir(_REPO_ROOT / "lance_array", remote_path="/repo/lance_array", copy=True)
+    .add_local_dir(
+        _REPO_ROOT / "lance_array", remote_path="/repo/lance_array", copy=True
+    )
     .add_local_dir(_REPO_ROOT / "scripts", remote_path="/repo/scripts", copy=True)
 )
 
@@ -65,9 +67,7 @@ def run_s3_benchmark() -> int:
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     prev = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (
-        REMOTE_REPO if not prev else f"{REMOTE_REPO}{os.pathsep}{prev}"
-    )
+    env["PYTHONPATH"] = REMOTE_REPO if not prev else f"{REMOTE_REPO}{os.pathsep}{prev}"
 
     cmd = [
         sys.executable,

@@ -1,0 +1,39 @@
+========== SUMMARY (full suite, S3) ==========
+ Mean / p50 / p95 / p99 are over per-request latencies (ms) across all reads; batched adds amortized
+                                      cache-build time per read.
+        Best-case Zarr vs Lance (Morton-order Lance vs row-order Zarr; Blosc2 on compressed Lance)
+                                   Unique chunks touched: 98 / 1024
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ Backend                            ┃ Request   ┃ Mean       ┃ p50        ┃ p95        ┃ p99        ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ Zarr uncompressed                  │ single    │ 66.479 ms  │ 58.484 ms  │ 109.477 ms │ 212.297 ms │
+│ Zarr uncompressed                  │ batched   │ 15.487 ms  │ 15.487 ms  │ 15.488 ms  │ 15.488 ms  │
+│ Zarr uncompressed                  │ slice 5x5 │ 163.006 ms │ 107.221 ms │ 447.789 ms │ 511.962 ms │
+│ Zarr compressed                    │ single    │ 50.656 ms  │ 27.906 ms  │ 110.741 ms │ 272.297 ms │
+│ Zarr compressed                    │ batched   │ 15.056 ms  │ 15.056 ms  │ 15.056 ms  │ 15.057 ms  │
+│ Zarr compressed                    │ slice 5x5 │ 113.753 ms │ 81.139 ms  │ 358.674 ms │ 439.866 ms │
+│ Lance uncompressed (Blosc2+Morton) │ single    │ 55.037 ms  │ 46.724 ms  │ 91.416 ms  │ 121.973 ms │
+│ Lance uncompressed (Blosc2+Morton) │ batched   │ 4.369 ms   │ 4.369 ms   │ 4.370 ms   │ 4.370 ms   │
+│ Lance uncompressed (Blosc2+Morton) │ slice 5x5 │ 140.082 ms │ 92.647 ms  │ 352.782 ms │ 388.368 ms │
+│ Lance compressed (Blosc2+Morton)   │ single    │ 26.915 ms  │ 20.307 ms  │ 54.851 ms  │ 154.624 ms │
+│ Lance compressed (Blosc2+Morton)   │ batched   │ 3.985 ms   │ 3.985 ms   │ 3.985 ms   │ 3.985 ms   │
+│ Lance compressed (Blosc2+Morton)   │ slice 5x5 │ 124.231 ms │ 73.739 ms  │ 325.206 ms │ 366.873 ms │
+└────────────────────────────────────┴───────────┴────────────┴────────────┴────────────┴────────────┘
+                        Morton vs Row Ordering (slice 5x5 only)
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ Backend                          ┃ Mean       ┃ p50       ┃ p95        ┃ p99        ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ Lance uncompressed row           │ 112.707 ms │ 81.136 ms │ 308.240 ms │ 500.331 ms │
+│ Lance uncompressed morton        │ 140.082 ms │ 92.647 ms │ 352.782 ms │ 388.368 ms │
+│ Lance compressed row (Blosc2)    │ 84.852 ms  │ 63.975 ms │ 270.137 ms │ 337.229 ms │
+│ Lance compressed morton (Blosc2) │ 124.231 ms │ 73.739 ms │ 325.206 ms │ 366.873 ms │
+└──────────────────────────────────┴────────────┴───────────┴────────────┴────────────┘
+        Zarr compressed vs Lance compressed (Blosc2 + Morton order) — by slice size
+┏━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ NxN ┃ Zarr μ     ┃ Zarr p50   ┃ Zarr p95   ┃ Zarr p99   ┃ Lance μ    ┃ Lance p50 ┃ Lance p95  ┃ Lance p99  ┃
+┡━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ 3×3 │ 75.256 ms  │ 63.203 ms  │ 160.988 ms │ 237.622 ms │ 84.323 ms  │ 54.197 ms │ 306.903 ms │ 375.045 ms │
+│ 5×5 │ 113.753 ms │ 81.139 ms  │ 358.674 ms │ 439.866 ms │ 124.231 ms │ 73.739 ms │ 325.206 ms │ 366.873 ms │
+│ 7×7 │ 149.600 ms │ 101.768 ms │ 368.148 ms │ 415.670 ms │ 87.275 ms  │ 68.309 ms │ 193.261 ms │ 322.405 ms │
+│ 9×9 │ 194.261 ms │ 161.130 ms │ 391.329 ms │ 442.010 ms │ 142.394 ms │ 82.231 ms │ 383.714 ms │ 430.521 ms │
+└─────┴────────────┴────────────┴────────────┴────────────┴────────────┴───────────┴────────────┴────────────┘

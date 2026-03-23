@@ -6,16 +6,22 @@
 [![Docs](https://img.shields.io/github/actions/workflow/status/slaf-project/lance-array/docs.yml?branch=main&label=docs)](https://github.com/slaf-project/lance-array/actions)
 [![Code style](https://img.shields.io/badge/code%20style-ruff-black.svg)](https://github.com/astral-sh/ruff)
 
-**lance-array** is chunk-aligned **2D arrays** on **Lance**: one row per tile, blob v2 payloads (often compressed), object-store-friendly IO, and **NumPy**-style slicing—**one physical chunk at a time**. Tabular metadata plus chunk bytes in Lance plays the same role as Zarr’s manifest plus chunk files, with Lance handling versioning, filters on non-blob columns, and unified storage.
+**lance-array** is chunk-aligned **2D arrays** on **Lance**. 
+
+- One row per tile, payloads are stored in raw or blosc compressed bytes. 
+- Chunks are written in Morton ordering, so spatially contiguous chunks are near each other (same as Zarr).
+- Object-store-friendly IO, and **NumPy**-style slicing—**one physical chunk at a time**. 
+- Tabular metadata plus chunk bytes in Lance plays the same role as Zarr’s manifest plus chunk files.
+- Lance handles versioning, eager prefetching, pushdown filtering on non-bytes columns, and unified storage.
 
 **Lance blobs** • **Zarr-like reads** • **Built-in codecs** (raw, numcodecs Blosc, Blosc2 via optional `zarr` extra) • **Benchmarks** vs Zarr 3
 
 ## 🚀 Key features
 
-- **2D rasters**: fixed `chunk_shape`, `(i, j)` tile keys, `lance_array.json` sidecar for `open_array()` metadata
-- **Reads**: NumPy/Zarr-style indexing—overlapping tiles batched (`take_blobs`), decoded and stitched; partial windows and strided slices supported
-- **Writes**: `mode="r+"` with basic `int` / `slice` (step 1) assignment and Lance merge-insert on tile keys; fancy/boolean/strided assignment not supported
-- **Not** a full Zarr implementation: no n-D generality or arbitrary codec pipeline—see [docs](https://slaf-project.github.io/lance-array/) and [`prds/`](prds/) for design notes
+- **2D rasters**: fixed `chunk_shape`, `(i, j)` tile keys, `lance_array.json` sidecar for `open_array()` metadata.
+- **Reads**: NumPy/Zarr-style indexing—overlapping tiles batched (`take`), decoded and stitched; partial windows and strided slices supported.
+- **Writes**: `mode="r+"` with basic `int` / `slice` (step 1) assignment and Lance merge-insert on tile keys; fancy/boolean/strided assignment not supported.
+- **Not** a full Zarr implementation: no n-D generality or arbitrary codec pipeline.
 
 ## 📦 Installation
 
@@ -61,16 +67,15 @@ rw = la.open_array("path/to/array.lance", mode="r+")
 rw[10:100, 5:200] = window         # merge-insert per overlapping tile
 ```
 
-Reads mirror `zarr.open_array(..., mode="r")` + slicing; writes are intentionally narrower (basic indices only). Side-by-side Zarr snippets and full semantics live in the [documentation](https://slaf-project.github.io/lance-array/).
+Reads mirror `zarr.open_array(..., mode="r")` + slicing; writes are intentionally narrower (basic indices only).
 
 ## 📚 Documentation
 
-- [Published docs](https://slaf-project.github.io/lance-array/)
-- Local preview: `uv sync --extra docs` then `uv run mkdocs serve`
+- [Quickstart](https://slaf-project.github.io/lance-array/)
 
 ## 📊 Benchmark
 
-Scripts under `scripts/` build aligned Zarr 3 and Lance datasets from `scripts/sample_2048.jpg`, then time random single-chunk reads and a batched replay pattern. `test.zarr/`, `test.lance/`, and `.bench_out/` are gitignored.
+Scripts under `scripts/` build aligned Zarr 3 and Lance datasets from `scripts/sample_2048.jpg`, then time random single-chunk reads and a batched replay pattern. `test.zarr/`, `test.lance/`, and `.bench_out/` are gitignored. Chunk size is 64 x 64.
 
 ```bash
 uv sync --extra dev --extra zarr
@@ -80,23 +85,15 @@ uv run python scripts/run_benchmark.py
 uv run python scripts/create_benchmark_datasets.py --full
 uv run python scripts/run_benchmark.py --full
 # Same suite on object storage (needs --extra cloud; 100 reads in S3 mode):
-# uv run python scripts/run_benchmark.py --full --s3 --s3-endpoint-url https://fly.storage.tigris.dev
+# uv run python scripts/run_benchmark.py --full --s3
 ```
 
-**Modal (remote S3 only).** The app expects a Modal secret **`s3-credentials`** (AWS/Tigris-style env). Then:
-
-```bash
-uv sync --extra modal
-modal run modal_app.py
-```
-
-Optional: `S3_BENCHMARK_PREFIX` (default `s3://slaf-datasets/lance_array`), `S3_BENCHMARK_ENDPOINT_URL` (passed through as `--s3-endpoint-url` when set). See the `modal_app.py` docstring.
 
 **Environment** (representative run)
 
 | | |
 |--|--|
-| Date | 2026-03-21 |
+| Date | 2026-03-23 |
 | Machine | Apple M1 Max, 32 GB RAM |
 | OS | macOS 26.0.1 (Tahoe) |
 | Python | 3.12.10 |
@@ -104,31 +101,30 @@ Optional: `S3_BENCHMARK_PREFIX` (default `s3://slaf-datasets/lance_array`), `S3_
 | `zarrs` ([zarrs-python](https://github.com/zarrs/zarrs-python), Rust codec pipeline) | 0.2.2 |
 | `lance` (PyPI `pylance`) | 3.0.1 |
 
-**Results** (2048×2048 `uint16`, 256×256 chunks). **MBP:** 500 random reads, local `.bench_out/`. **MBP Tigris:** same object-store datasets via `run_benchmark.py --full --s3` on the laptop, 100 random reads. **Modal:** `modal run modal_app.py` against Tigris, 100 random reads. Remote size omitted.
+### Full-suite latency (p50 / p95 / p99)
 
-| Storage | Backend | Size (MiB) | Single-chunk (ms) | Batched replay (ms) |
-|---------|---------|------------|-------------------|---------------------|
-| SSD -> MBP | Zarr (no compression) | 8.00 | 0.350 | 0.039 |
-| SSD -> MBP | Lance (no compression) | 8.01 | 0.426 | 0.011 |
-| SSD -> MBP | Zarr (numcodecs Blosc) | 1.77 | 0.397 | 0.036 |
-| SSD -> MBP | Lance (numcodecs Blosc) | 1.78 | 0.452 | 0.024 |
-| SSD -> MBP | Lance (Blosc2) | 1.78 | 0.584 | 0.019 |
-| Tigris S3 -> MBP | Zarr (no compression) | — | 115.013 | 52.267 |
-| Tigris S3 -> MBP | Lance (no compression) | — | 129.901 | 39.084 |
-| Tigris S3 -> MBP | Zarr (numcodecs Blosc) | — | 62.164 | 16.808 |
-| Tigris S3 -> MBP | Lance (numcodecs Blosc) | — | 107.051 | 24.221 |
-| Tigris S3 -> MBP | Lance (Blosc2) | — | 90.589 | 22.903 |
-| Tigris S3 -> Modal | Zarr (no compression) | — | 60.075 | 28.494 |
-| Tigris S3 -> Modal | Lance (no compression) | — | 80.082 | 26.430 |
-| Tigris S3 -> Modal | Zarr (numcodecs Blosc) | — | 46.109 | 10.034 |
-| Tigris S3 -> Modal | Lance (numcodecs Blosc) | — | 58.150 | 13.686 |
-| Tigris S3 -> Modal | Lance (Blosc2) | — | 120.859 | 27.134 |
+The `run_benchmark.py --full` tables report **per-request** latencies. **Means** are easy to skew (e.g. first read / cold cache), so the charts use **p50 / p95 / p99** on a **shared x-axis**; each **horizontal facet** is one condition (single tile uncompressed/compressed, then each slice size). **Zarr** and **Lance** are paired bars per percentile; **y** is comparable across p50–p99 within each facet. Captions for methodology and data source are **below each figure**. Generated from captured benchmark output:
 
-**Notes.** 
-- “Single” is one slice per iteration without cross-iteration caching. 
-- “Batched” prefetches unique chunks (Lance: `take_blobs` in batches; Zarr: in-memory cache), then replays the same access order—useful when amortizing object-store round trips. 
-- **Zarr** timings use the **zarrs** Rust codec pipeline (default in `run_benchmark.py` when `zarrs` is installed on Python 3.11+; pass `--no-zarrs` for zarr-python’s default pipeline). 
-- **SSD -> MBP** figures match the environment table above (local disk). **Tigris S3 -> MBP** is the same machine reading Tigris via `--s3`. **Tigris S3 -> Modal** is `modal_app.py` + Tigris. Re-run on your stack before drawing conclusions.
+- `scripts/local_summary.txt` — SSD → laptop  
+- `scripts/s3_summary.txt` — object store (e.g. Tigris) → laptop  
+
+Regenerate SVGs after updating those files:
+
+```bash
+uv sync --extra dev
+uv run python scripts/render_benchmark_charts.py
+```
+
+**Labels.** **Lance uncompressed (Morton order)** is **raw** payload (no Blosc2)—only **Morton (Z-order) tile sequencing** in the Lance table. **Lance compressed (Blosc2 + Morton)** is Blosc2-compressed tiles with the same Morton ordering.
+
+![Full benchmark local — p50 / p95 / p99 per request](docs/images/benchmarks/benchmark_local_p50_p95_p99.svg)
+
+*Caption — **local SSD → laptop**:* Per-request latency; **means omitted** (often skewed by cold starts). **Batched + replay** not shown. **Single tile (uncompressed):** Zarr row-major chunk order vs Lance **raw** payload and **Morton (Z-order)** tile rows. **Single tile (compressed)** and **slices:** Zarr **numcodecs Blosc** vs Lance **Blosc2** with the same Morton ordering. Slices use every N×N row from the compressed scaling table. Source: `scripts/local_summary.txt`.
+
+![Full benchmark S3 → laptop — p50 / p95 / p99 per request](docs/images/benchmarks/benchmark_s3_p50_p95_p99.svg)
+
+*Caption — **object store → laptop**:* Same layout and comparisons as above. Source: `scripts/s3_summary.txt`.
+
 
 ## 🙏 Acknowledgments
 

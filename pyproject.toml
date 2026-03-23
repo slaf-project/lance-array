@@ -23,6 +23,7 @@ zarr = [
     "blosc2>=3.0.0",
     "pillow>=10.0.0",
     "tqdm>=4.0.0",
+    "rich>=13.0.0",
     # Rust-backed codec pipeline for zarr-python 3.x (LocalStore); Python 3.11+ only
     "zarrs>=0.2.0; python_version >= '3.11'",
 ]
@@ -32,8 +33,10 @@ dev = [
     "coverage>=7.9.1",
     "ruff>=0.12.0",
     "prek>=0.3.0",
+    "rich>=13.0.0",
     "smart-open[s3]>=6.0.0",
     "ty>=0.0.20",
+    "matplotlib>=3.8.0",
 ]
 docs = [
     "mkdocs>=1.5.0",
@@ -64,6 +67,8 @@ ignore = ["E501", "B008", "C901"]
 "__init__.py" = ["F401"]
 "scripts/create_benchmark_datasets.py" = ["E402"]
 "scripts/run_benchmark.py" = ["E402", "I001"]
+"scripts/run_slice_scaling_benchmark.py" = ["E402", "I001"]
+"scripts/render_benchmark_charts.py" = ["E402", "I001"]
 "modal_app.py" = ["I001"]
 
 [tool.pytest.ini_options]

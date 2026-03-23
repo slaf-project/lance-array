@@ -54,6 +54,32 @@ def test_shape_must_be_divisible_by_chunk(tmp_path) -> None:
         )
 
 
+def test_morton_tile_order_roundtrip_and_column(tmp_path) -> None:
+    img = np.arange(64, dtype=np.uint16).reshape(8, 8)
+    view = LanceArray.to_lance(
+        tmp_path / "morton.lance",
+        img,
+        (2, 2),
+        codec=TileCodec.RAW,
+        tile_order="morton",
+    )
+    assert_array_equal(view.to_numpy(), img)
+    names = view.dataset.schema.names
+    assert "morton_code" in names
+
+
+def test_hilbert_tile_order_roundtrip(tmp_path) -> None:
+    img = np.arange(64, dtype=np.uint16).reshape(8, 8)
+    view = LanceArray.to_lance(
+        tmp_path / "hilbert.lance",
+        img,
+        (2, 2),
+        codec=TileCodec.RAW,
+        tile_order="hilbert",
+    )
+    assert_array_equal(view.to_numpy(), img)
+
+
 def test_blosc_numcodecs_roundtrip_and_slice(tmp_path) -> None:
     rng = np.random.default_rng(7)
     img = rng.integers(0, 65535, size=(32, 24), dtype=np.uint16)
